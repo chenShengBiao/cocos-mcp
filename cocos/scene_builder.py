@@ -1597,3 +1597,38 @@ def add_filled_sprite(scene_path: str | Path, node_id: int,
     cid = _attach_component(s, node_id, obj)
     _save_scene(scene_path, s)
     return cid
+
+
+# ----------- UIOpacity (淡入淡出动画必备) -----------
+
+def add_ui_opacity(scene_path: str | Path, node_id: int, opacity: int = 255) -> int:
+    """Attach cc.UIOpacity. Controls node transparency (0=invisible, 255=opaque).
+
+    Essential for fade-in/out animations via tween:
+      tween(node.getComponent(UIOpacity)).to(0.5, {opacity: 0}).start()
+    """
+    return add_component(scene_path, node_id, "cc.UIOpacity", {
+        "opacity": opacity,
+    })
+
+
+# ----------- BlockInputEvents (弹窗遮罩层必备) -----------
+
+def add_block_input_events(scene_path: str | Path, node_id: int) -> int:
+    """Attach cc.BlockInputEvents. Prevents touch/mouse events from passing through.
+
+    Put this on a fullscreen overlay node to block clicks on nodes behind it.
+    Typical use: modal dialog backdrop, loading screen.
+    """
+    return add_component(scene_path, node_id, "cc.BlockInputEvents", {})
+
+
+# ----------- SafeArea (刘海屏/异形屏适配) -----------
+
+def add_safe_area(scene_path: str | Path, node_id: int) -> int:
+    """Attach cc.SafeArea. Auto-adjusts node to fit within the device safe area.
+
+    Essential for mobile games on iPhone (notch) / Android (cutout).
+    Usually placed on the root UI node.
+    """
+    return add_component(scene_path, node_id, "cc.SafeArea", {})

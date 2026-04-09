@@ -934,6 +934,25 @@ def cocos_add_filled_sprite(scene_path: str, node_id: int,
                                 (color_r, color_g, color_b, color_a))
 
 
+
+@mcp.tool()
+def cocos_add_ui_opacity(scene_path: str, node_id: int, opacity: int = 255) -> int:
+    """Attach cc.UIOpacity (0=invisible, 255=opaque). Required for fade animations."""
+    return sb.add_ui_opacity(scene_path, node_id, opacity)
+
+
+@mcp.tool()
+def cocos_add_block_input_events(scene_path: str, node_id: int) -> int:
+    """Attach cc.BlockInputEvents. Blocks touch/mouse from passing through this node."""
+    return sb.add_block_input_events(scene_path, node_id)
+
+
+@mcp.tool()
+def cocos_add_safe_area(scene_path: str, node_id: int) -> int:
+    """Attach cc.SafeArea. Auto-fits node to device safe area (notch/cutout)."""
+    return sb.add_safe_area(scene_path, node_id)
+
+
 # =====================================================================
 # Build: multi-scene & platform configuration
 # =====================================================================
