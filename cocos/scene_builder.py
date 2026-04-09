@@ -487,9 +487,38 @@ def add_node(scene_path: str | Path, parent_id: int, name: str,
     return new_id
 
 
+# Components that require UITransform to render. If attaching one of these
+# and the node doesn't already have a UITransform, auto-add one.
+_UI_RENDER_TYPES = frozenset({
+    "cc.Sprite", "cc.Label", "cc.Graphics", "cc.RichText", "cc.Mask",
+    "cc.ParticleSystem2D", "sp.Skeleton", "dragonBones.ArmatureDisplay",
+})
+
+
+def _has_uitransform(s: list, node_id: int) -> bool:
+    for comp_ref in s[node_id].get("_components", []):
+        cid = comp_ref.get("__id__")
+        if cid is not None and cid < len(s) and s[cid].get("__type__") == "cc.UITransform":
+            return True
+    return False
+
+
+def _ensure_uitransform(s: list, node_id: int) -> None:
+    """Auto-add a default UITransform if the node doesn't have one."""
+    if not _has_uitransform(s, node_id):
+        uit = _make_uitransform(node_id, 100, 100)
+        s.append(uit)
+        uit_id = len(s) - 1
+        s[node_id].setdefault("_components", []).insert(0, _ref(uit_id))
+
+
 def _attach_component(s: list, node_id: int, comp_obj: dict) -> int:
     if s[node_id].get("__type__") != "cc.Node":
         raise ValueError(f"node_id {node_id} is not a cc.Node")
+    # Auto-add UITransform for UI render components
+    comp_type = comp_obj.get("__type__", "")
+    if comp_type in _UI_RENDER_TYPES:
+        _ensure_uitransform(s, node_id)
     s.append(comp_obj)
     new_id = len(s) - 1
     s[node_id].setdefault("_components", []).append(_ref(new_id))
