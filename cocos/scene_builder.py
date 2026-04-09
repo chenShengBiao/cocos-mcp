@@ -570,21 +570,25 @@ def add_script(scene_path: str | Path, node_id: int, script_uuid_compressed: str
 
     `script_uuid_compressed` is the 23-char short form (use compress_uuid()
     on the script's .ts.meta uuid).
-    `props` lets you set @property fields. References should be passed as
-    plain ints (node/component ids) and will be wrapped automatically.
+
+    `props` values are passed as-is. To reference a node/component, pass
+    ``{"__id__": N}`` explicitly. To reference a resource (Prefab, SpriteFrame),
+    pass ``{"__uuid__": "xxx"}``. Plain int/float/string/bool are kept as
+    literal values.
+
+    Example::
+
+        add_script(scene, node, short_uuid, props={
+            "scoreLabel": {"__id__": label_cmp_id},  # ref to component
+            "birdNode": {"__id__": bird_node_id},     # ref to node
+            "playerId": 1,                             # literal int (NOT a ref!)
+            "speed": 100.0,                            # literal float
+            "prefab": {"__uuid__": prefab_uuid},       # resource ref
+        })
     """
     s = _load_scene(scene_path)
-    if props:
-        wrapped: dict[str, Any] = {}
-        for k, v in props.items():
-            if isinstance(v, int) and not isinstance(v, bool):
-                # Heuristic: an int property is interpreted as a node/component
-                # ref. Cocos numeric props that aren't refs should be passed
-                # as float (e.g. 1.0).
-                wrapped[k] = _ref(v)
-            else:
-                wrapped[k] = v
-        props = wrapped
+    # No auto-wrapping — all values passed as-is to avoid the int→ref footgun
+    # (e.g. playerId: 1 should NOT become {"__id__": 1})
     cid = _attach_component(s, node_id, _make_script_component(script_uuid_compressed, node_id, props))
     _save_scene(scene_path, s)
     return cid
@@ -1486,7 +1490,7 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> dict:
 
             elif action == "attach_script":
                 nid = op["node_id"]
-                props = _wrap_props(op.get("props") or {})
+                props = op.get("props") or {}  # no auto-wrap, pass as-is
                 cid = _attach_component(s, nid, _make_script_component(
                     op["script_uuid_compressed"], nid, props))
                 results.append(cid)

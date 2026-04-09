@@ -185,13 +185,18 @@ class TestComponents:
         path, info = _tmp_scene()
         n = add_node(path, info["canvas_node_id"], "GM")
         cid = add_script(path, n, "5372db1ch5D9rAE0w2hyKmg", props={
-            "speed": 100.0, "label": 15,  # int → ref
+            "speed": 100.0,
+            "playerId": 1,                    # literal int — stays as 1
+            "label": {"__id__": 15},          # explicit ref
+            "prefab": {"__uuid__": "abc-123"},  # resource ref
         })
         with open(path) as f:
             data = json.load(f)
         assert data[cid]["__type__"] == "5372db1ch5D9rAE0w2hyKmg"
         assert data[cid]["speed"] == 100.0
+        assert data[cid]["playerId"] == 1          # NOT {"__id__": 1}
         assert data[cid]["label"] == {"__id__": 15}
+        assert data[cid]["prefab"] == {"__uuid__": "abc-123"}
 
 
 class TestBatchOps:
