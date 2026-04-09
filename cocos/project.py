@@ -922,7 +922,7 @@ def create_sprite_atlas(project_path: str | Path, atlas_name: str,
     }
 
 
-# ----------- gen-asset bridge -----------
+# ----------- AI asset generation (built-in) -----------
 
 def generate_and_import_image(
     project_path: str | Path,
@@ -937,8 +937,9 @@ def generate_and_import_image(
 ) -> dict:
     """Generate a game asset via AI, make it transparent, and import into project.
 
-    Requires gen-asset skill installed at ~/.claude/skills/gen-asset/.
-    Uses 智谱 CogView-3-Flash (free) by default, or Pollinations Flux.
+    Built-in: uses cocos/gen_asset.py (智谱 CogView-3-Flash free / Pollinations Flux).
+    No external dependencies needed — just set ZHIPU_API_KEY env var or
+    create cocos-mcp/.env with ZHIPU_API_KEY=xxx.
 
     Args:
         prompt: Image description (English recommended for better quality)
@@ -949,17 +950,26 @@ def generate_and_import_image(
 
     Returns {path, uuid, sprite_frame_uuid, generated_png, transparent_png}
     """
-    import subprocess, glob
+    import subprocess
 
-    gen_asset_dir = Path.home() / ".claude/skills/gen-asset"
-    gen_py = gen_asset_dir / "gen.py"
-    make_trans_py = gen_asset_dir / "make_transparent.py"
+    # Use built-in scripts (shipped with cocos-mcp)
+    cocos_dir = Path(__file__).resolve().parent
+    gen_py = cocos_dir / "gen_asset.py"
+    make_trans_py = cocos_dir / "make_transparent.py"
 
     if not gen_py.exists():
-        raise FileNotFoundError(
-            f"gen-asset skill not found at {gen_asset_dir}. "
-            "Install it first: see ~/.claude/skills/gen-asset/"
-        )
+        raise FileNotFoundError(f"gen_asset.py not found at {gen_py}")
+
+    # Load .env for ZHIPU_API_KEY if not in environment
+    env = dict(os.environ)
+    if "ZHIPU_API_KEY" not in env:
+        env_file = cocos_dir.parent / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
 
     p = Path(project_path).expanduser().resolve()
     tmp_dir = Path("/tmp/cocos-mcp-gen")
@@ -975,24 +985,23 @@ def generate_and_import_image(
         "--out", str(tmp_dir),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
     if result.returncode != 0:
-        raise RuntimeError(f"gen.py failed: {result.stderr[-500:]}")
+        raise RuntimeError(f"gen_asset.py failed: {result.stderr[-500:]}")
 
     # Find the generated PNG (newest file in tmp_dir)
     pngs = sorted(tmp_dir.glob("*.png"), key=lambda f: f.stat().st_mtime, reverse=True)
     if not pngs:
-        raise RuntimeError("gen.py produced no PNG output")
+        raise RuntimeError("gen_asset.py produced no PNG output")
     generated_png = pngs[0]
 
     # 2. Make transparent (if requested and not scene/tile)
     transparent_png = generated_png
     if transparent and style not in ("scene", "tile"):
-        result2 = subprocess.run(
+        subprocess.run(
             [sys.executable, str(make_trans_py), str(generated_png)],
             capture_output=True, text=True, timeout=60,
         )
-        # Output is <name>-transparent.png
         trans_path = generated_png.with_name(
             generated_png.stem + "-transparent.png"
         )

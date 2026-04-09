@@ -736,16 +736,19 @@ def cocos_generate_asset(project_path: str, prompt: str, name: str,
                          as_resource: bool = False) -> dict:
     """Generate a game asset via AI and import it into the project in one step.
 
-    Uses gen-asset skill (智谱 CogView-3-Flash free / Pollinations Flux free).
-    Automatically: generate PNG → remove white background → write sprite-frame meta.
+    Built-in AI image generation (no external dependencies):
+    - 智谱 CogView-3-Flash (free) — set ZHIPU_API_KEY in cocos-mcp/.env
+    - Pollinations Flux (free, no key) — use provider="pollinations"
+
+    Flow: AI generate PNG → remove white background → write sprite-frame meta.
+    Config: create .env file in cocos-mcp/ root with ZHIPU_API_KEY=your_key
 
     Example:
-      result = cocos_generate_asset(project, "cute yellow cartoon bird facing right",
+      result = cocos_generate_asset(project, "cute yellow cartoon bird",
                                     "bird", style="icon")
       cocos_add_sprite(scene, node, sprite_frame_uuid=result["sprite_frame_uuid"])
 
     Styles: icon, pixel, character, tile, ui, portrait, item, scene, none.
-    Set transparent=False for scene/tile (full-frame images).
     """
     return cp.generate_and_import_image(project_path, prompt, name, style,
                                         width, height, provider, transparent, as_resource)
