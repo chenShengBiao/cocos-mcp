@@ -1573,3 +1573,27 @@ def add_tiled_layer(scene_path: str | Path, node_id: int,
     return add_component(scene_path, node_id, "cc.TiledLayer", {
         "_layerName": layer_name,
     })
+
+
+def add_filled_sprite(scene_path: str | Path, node_id: int,
+                      sprite_frame_uuid: str | None = None,
+                      fill_type: int = 0, fill_center: tuple = (0.5, 0.5),
+                      fill_start: float = 0, fill_range: float = 1.0,
+                      color: tuple = (255, 255, 255, 255)) -> int:
+    """Attach cc.Sprite with type=FILLED (radial/horizontal/vertical fill).
+
+    fill_type: 0=HORIZONTAL, 1=VERTICAL, 2=RADIAL
+    fill_start: 0~1 fill starting position
+    fill_range: 0~1 fill amount (useful for cooldown timers)
+    fill_center: center point for RADIAL fill
+    """
+    s = _load_scene(scene_path)
+    obj = _make_sprite(node_id, sprite_frame_uuid, size_mode=0, color=color)
+    obj["_type"] = 3  # FILLED
+    obj["_fillType"] = fill_type
+    obj["_fillCenter"] = _vec2(*fill_center)
+    obj["_fillStart"] = fill_start
+    obj["_fillRange"] = fill_range
+    cid = _attach_component(s, node_id, obj)
+    _save_scene(scene_path, s)
+    return cid

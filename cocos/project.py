@@ -159,19 +159,24 @@ def add_script(project_path: str | Path, rel_path: str, source: str, uuid: str |
 
 
 def add_image(project_path: str | Path, src_png: str | Path, rel_path: str | None = None,
-              uuid: str | None = None) -> dict:
-    """Copy a PNG into project/assets/textures/ (or custom path) + write sprite-frame meta."""
+              uuid: str | None = None, as_resource: bool = False) -> dict:
+    """Copy a PNG into project + write sprite-frame meta.
+
+    Default location: assets/textures/. If as_resource=True, places it under
+    assets/resources/ so it can be loaded at runtime via resources.load().
+    """
     p = Path(project_path).expanduser().resolve()
     src = Path(src_png).expanduser().resolve()
     if not src.exists():
         raise FileNotFoundError(f"source PNG not found: {src}")
 
+    default_dir = "assets/resources" if as_resource else "assets/textures"
     if rel_path:
         rel = rel_path.lstrip("/")
         if not rel.startswith("assets/"):
-            rel = f"assets/textures/{rel}"
+            rel = f"{default_dir}/{rel}"
     else:
-        rel = f"assets/textures/{src.name}"
+        rel = f"{default_dir}/{src.name}"
 
     if not rel.endswith(".png"):
         rel = f"{rel}.png"

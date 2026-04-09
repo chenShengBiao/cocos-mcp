@@ -129,18 +129,16 @@ def cocos_add_script(project_path: str, rel_path: str, source: str) -> dict:
 
 
 @mcp.tool()
-def cocos_add_image(project_path: str, src_png: str, rel_path: str | None = None) -> dict:
+def cocos_add_image(project_path: str, src_png: str, rel_path: str | None = None,
+                    as_resource: bool = False) -> dict:
     """Copy a PNG into the project and write a complete sprite-frame meta.
 
-    Unlike letting `cocos_build` auto-import (which produces a `texture`
-    type meta with no sprite-frame sub), this writes a full sprite-frame
-    meta upfront with both `6c48a` (texture) and `f9941` (sprite-frame)
-    sub-resources.
+    Default: assets/textures/. Set as_resource=True to put it under
+    assets/resources/ (needed for runtime loading via resources.load()).
 
     Returns {path, rel_path, main_uuid, sprite_frame_uuid, texture_uuid}.
-    Use sprite_frame_uuid in scene files for `cc.Sprite._spriteFrame`.
     """
-    return cp.add_image(project_path, src_png, rel_path)
+    return cp.add_image(project_path, src_png, rel_path, as_resource=as_resource)
 
 
 @mcp.tool()
@@ -915,6 +913,25 @@ def cocos_add_tiled_sprite(scene_path: str, node_id: int,
     """Attach cc.Sprite with type=TILED (repeating pattern fill)."""
     return sb.add_tiled_sprite(scene_path, node_id, sprite_frame_uuid,
                                (color_r, color_g, color_b, color_a))
+
+
+@mcp.tool()
+def cocos_add_filled_sprite(scene_path: str, node_id: int,
+                            sprite_frame_uuid: str | None = None,
+                            fill_type: int = 0, fill_start: float = 0,
+                            fill_range: float = 1.0,
+                            fill_center_x: float = 0.5, fill_center_y: float = 0.5,
+                            color_r: int = 255, color_g: int = 255,
+                            color_b: int = 255, color_a: int = 255) -> int:
+    """Attach cc.Sprite with type=FILLED (cooldown timer, radial progress).
+
+    fill_type: 0=HORIZONTAL, 1=VERTICAL, 2=RADIAL.
+    fill_range: 0~1 controls how much is filled (e.g. 0.3 = 30% filled).
+    """
+    return sb.add_filled_sprite(scene_path, node_id, sprite_frame_uuid,
+                                fill_type, (fill_center_x, fill_center_y),
+                                fill_start, fill_range,
+                                (color_r, color_g, color_b, color_a))
 
 
 # =====================================================================
