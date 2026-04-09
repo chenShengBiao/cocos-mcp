@@ -729,6 +729,46 @@ def cocos_add_resource_file(project_path: str, src_path: str,
     return cp.add_resource_file(project_path, src_path, rel_path, uuid)
 
 
+@mcp.tool()
+def cocos_generate_asset(project_path: str, prompt: str, name: str,
+                         style: str = "icon", width: int = 1024, height: int = 1024,
+                         provider: str = "zhipu", transparent: bool = True,
+                         as_resource: bool = False) -> dict:
+    """Generate a game asset via AI and import it into the project in one step.
+
+    Uses gen-asset skill (智谱 CogView-3-Flash free / Pollinations Flux free).
+    Automatically: generate PNG → remove white background → write sprite-frame meta.
+
+    Example:
+      result = cocos_generate_asset(project, "cute yellow cartoon bird facing right",
+                                    "bird", style="icon")
+      cocos_add_sprite(scene, node, sprite_frame_uuid=result["sprite_frame_uuid"])
+
+    Styles: icon, pixel, character, tile, ui, portrait, item, scene, none.
+    Set transparent=False for scene/tile (full-frame images).
+    """
+    return cp.generate_and_import_image(project_path, prompt, name, style,
+                                        width, height, provider, transparent, as_resource)
+
+
+@mcp.tool()
+def cocos_create_sprite_atlas(project_path: str, atlas_name: str,
+                              png_paths: list[str],
+                              rel_dir: str | None = None,
+                              max_width: int = 2048, max_height: int = 2048) -> dict:
+    """Bundle multiple PNGs into a SpriteAtlas (AutoAtlas .pac).
+
+    Copies PNGs into assets/atlas/<name>/, writes sprite-frame metas,
+    and creates a .pac config. Cocos Creator merges them into one
+    texture at build time for better draw-call performance.
+
+    Returns {dir, atlas_uuid, pac_path, images: [{path, uuid, sprite_frame_uuid}]}.
+    Use each image's sprite_frame_uuid with cocos_add_sprite().
+    """
+    return cp.create_sprite_atlas(project_path, atlas_name, png_paths,
+                                  rel_dir, max_width=max_width, max_height=max_height)
+
+
 # =====================================================================
 # AnimationClip generator
 # =====================================================================

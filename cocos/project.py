@@ -829,3 +829,186 @@ def add_tiled_map_asset(project_path: str | Path, tmx_path: str | Path,
         "textures": tex_uuids,
         "dir": str(dst_dir),
     }
+
+
+# ----------- SpriteAtlas -----------
+
+def create_sprite_atlas(project_path: str | Path, atlas_name: str,
+                        png_paths: list[str | Path],
+                        rel_dir: str | None = None,
+                        uuid: str | None = None,
+                        max_width: int = 2048, max_height: int = 2048) -> dict:
+    """Create a SpriteAtlas (.plist-style) by collecting multiple PNGs.
+
+    Cocos Creator 3.x uses AutoAtlas (.pac file) rather than traditional
+    .plist atlases. This creates an AutoAtlas config that bundles the
+    specified PNGs into a single texture at build time.
+
+    Steps:
+      1. Copy all PNGs into a dedicated folder (assets/atlas/<atlas_name>/)
+      2. Write sprite-frame meta for each PNG
+      3. Create an AutoAtlas config (.pac) in the same folder
+
+    Returns {dir, atlas_uuid, images: [{path, uuid, sprite_frame_uuid}]}
+    """
+    p = Path(project_path).expanduser().resolve()
+    if rel_dir:
+        base = rel_dir.lstrip("/")
+        if not base.startswith("assets/"):
+            base = f"assets/{base}"
+    else:
+        base = f"assets/atlas/{atlas_name}"
+
+    dst_dir = p / base
+    dst_dir.mkdir(parents=True, exist_ok=True)
+
+    atlas_uuid = uuid or new_uuid()
+    images = []
+
+    # Copy each PNG + write sprite-frame meta
+    for png in png_paths:
+        src = Path(png).expanduser().resolve()
+        if not src.exists():
+            continue
+        dst = dst_dir / src.name
+        shutil.copy2(src, dst)
+        from .meta_util import new_sprite_frame_meta
+        img_uuid = new_uuid()
+        meta = new_sprite_frame_meta(dst, uuid=img_uuid)
+        write_meta(dst, meta)
+        images.append({
+            "path": str(dst),
+            "uuid": img_uuid,
+            "sprite_frame_uuid": f"{img_uuid}@f9941",
+        })
+
+    # Create AutoAtlas .pac file
+    pac_path = dst_dir / f"{atlas_name}.pac"
+    pac_data = {
+        "__type__": "cc.SpriteAtlas",
+        "_name": atlas_name,
+        "maxWidth": max_width,
+        "maxHeight": max_height,
+        "padding": 2,
+        "allowRotation": True,
+        "forceSquared": False,
+        "powerOfTwo": True,
+        "algorithm": "MaxRect",
+        "format": "png",
+        "quality": 80,
+        "contourBleed": True,
+        "paddingBleed": True,
+        "filterUnused": False,
+    }
+    with open(pac_path, "w") as f:
+        json.dump(pac_data, f, indent=2)
+
+    # Write .pac meta
+    write_meta(pac_path, {
+        "ver": "1.0.7",
+        "importer": "auto-atlas",
+        "imported": True,
+        "uuid": atlas_uuid,
+        "files": [".json"],
+        "subMetas": {},
+        "userData": {},
+    })
+
+    return {
+        "dir": str(dst_dir),
+        "atlas_uuid": atlas_uuid,
+        "pac_path": str(pac_path),
+        "images": images,
+    }
+
+
+# ----------- gen-asset bridge -----------
+
+def generate_and_import_image(
+    project_path: str | Path,
+    prompt: str,
+    name: str,
+    style: str = "icon",
+    width: int = 1024,
+    height: int = 1024,
+    provider: str = "zhipu",
+    transparent: bool = True,
+    as_resource: bool = False,
+) -> dict:
+    """Generate a game asset via AI, make it transparent, and import into project.
+
+    Requires gen-asset skill installed at ~/.claude/skills/gen-asset/.
+    Uses 智谱 CogView-3-Flash (free) by default, or Pollinations Flux.
+
+    Args:
+        prompt: Image description (English recommended for better quality)
+        name: Output filename (without extension)
+        style: icon/pixel/character/tile/ui/portrait/item/scene/none
+        transparent: Whether to remove white background (skip for scene/tile)
+        as_resource: Put in assets/resources/ for runtime loading
+
+    Returns {path, uuid, sprite_frame_uuid, generated_png, transparent_png}
+    """
+    import subprocess, glob
+
+    gen_asset_dir = Path.home() / ".claude/skills/gen-asset"
+    gen_py = gen_asset_dir / "gen.py"
+    make_trans_py = gen_asset_dir / "make_transparent.py"
+
+    if not gen_py.exists():
+        raise FileNotFoundError(
+            f"gen-asset skill not found at {gen_asset_dir}. "
+            "Install it first: see ~/.claude/skills/gen-asset/"
+        )
+
+    p = Path(project_path).expanduser().resolve()
+    tmp_dir = Path("/tmp/cocos-mcp-gen")
+    tmp_dir.mkdir(exist_ok=True)
+
+    # 1. Generate image
+    cmd = [
+        sys.executable, str(gen_py), prompt,
+        "--style", style,
+        "--width", str(width),
+        "--height", str(height),
+        "--provider", provider,
+        "--out", str(tmp_dir),
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise RuntimeError(f"gen.py failed: {result.stderr[-500:]}")
+
+    # Find the generated PNG (newest file in tmp_dir)
+    pngs = sorted(tmp_dir.glob("*.png"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not pngs:
+        raise RuntimeError("gen.py produced no PNG output")
+    generated_png = pngs[0]
+
+    # 2. Make transparent (if requested and not scene/tile)
+    transparent_png = generated_png
+    if transparent and style not in ("scene", "tile"):
+        result2 = subprocess.run(
+            [sys.executable, str(make_trans_py), str(generated_png)],
+            capture_output=True, text=True, timeout=60,
+        )
+        # Output is <name>-transparent.png
+        trans_path = generated_png.with_name(
+            generated_png.stem + "-transparent.png"
+        )
+        if trans_path.exists():
+            transparent_png = trans_path
+
+    # 3. Import into project
+    final_name = f"{name}.png"
+    import_result = add_image(
+        str(p), str(transparent_png),
+        rel_path=final_name,
+        as_resource=as_resource,
+    )
+
+    return {
+        **import_result,
+        "generated_png": str(generated_png),
+        "transparent_png": str(transparent_png),
+    }
