@@ -207,7 +207,11 @@ def _make_sprite(node_idx: int, sprite_frame_uuid: str | None, size_mode: int = 
 
 
 def _make_label(node_idx: int, text: str, font_size: int = 40, color=(255, 255, 255, 255),
-                h_align: int = 1, v_align: int = 1) -> dict:
+                h_align: int = 1, v_align: int = 1,
+                overflow: int = 0, enable_wrap: bool = False,
+                line_height: int = 0, enable_outline: bool = True,
+                outline_color=(0, 0, 0, 255), outline_width: int = 3,
+                cache_mode: int = 0) -> dict:
     return {
         "__type__": "cc.Label",
         "_name": "",
@@ -226,9 +230,9 @@ def _make_label(node_idx: int, text: str, font_size: int = 40, color=(255, 255, 
         "_actualFontSize": font_size,
         "_fontSize": font_size,
         "_fontFamily": "Arial",
-        "_lineHeight": font_size,
-        "_overflow": 0,
-        "_enableWrapText": False,
+        "_lineHeight": line_height if line_height > 0 else font_size,
+        "_overflow": overflow,
+        "_enableWrapText": enable_wrap,
         "_font": None,
         "_isSystemFontUsed": True,
         "_spacingX": 0,
@@ -236,10 +240,10 @@ def _make_label(node_idx: int, text: str, font_size: int = 40, color=(255, 255, 
         "_isBold": False,
         "_isUnderline": False,
         "_underlineHeight": 2,
-        "_cacheMode": 0,
-        "_enableOutline": True,
-        "_outlineColor": _color(0, 0, 0, 255),
-        "_outlineWidth": 3,
+        "_cacheMode": cache_mode,
+        "_enableOutline": enable_outline,
+        "_outlineColor": _color(*outline_color),
+        "_outlineWidth": outline_width,
         "_enableShadow": False,
         "_shadowColor": _color(0, 0, 0, 255),
         "_shadowOffset": _vec2(2, 2),
@@ -542,9 +546,16 @@ def add_sprite(scene_path: str | Path, node_id: int, sprite_frame_uuid: str | No
 
 
 def add_label(scene_path: str | Path, node_id: int, text: str, font_size: int = 40,
-              color: tuple = (255, 255, 255, 255), h_align: int = 1, v_align: int = 1) -> int:
+              color: tuple = (255, 255, 255, 255), h_align: int = 1, v_align: int = 1,
+              overflow: int = 0, enable_wrap: bool = False, line_height: int = 0,
+              enable_outline: bool = True, outline_color: tuple = (0, 0, 0, 255),
+              outline_width: int = 3, cache_mode: int = 0) -> int:
+    """overflow: 0=NONE, 1=CLAMP, 2=SHRINK, 3=RESIZE_HEIGHT.
+    cache_mode: 0=NONE, 1=BITMAP, 2=CHAR."""
     s = _load_scene(scene_path)
-    cid = _attach_component(s, node_id, _make_label(node_id, text, font_size, color, h_align, v_align))
+    cid = _attach_component(s, node_id, _make_label(
+        node_id, text, font_size, color, h_align, v_align,
+        overflow, enable_wrap, line_height, enable_outline, outline_color, outline_width, cache_mode))
     _save_scene(scene_path, s)
     return cid
 

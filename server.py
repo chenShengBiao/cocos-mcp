@@ -233,10 +233,16 @@ def cocos_add_sprite(scene_path: str, node_id: int, sprite_frame_uuid: str | Non
 @mcp.tool()
 def cocos_add_label(scene_path: str, node_id: int, text: str, font_size: int = 40,
                     color_r: int = 255, color_g: int = 255, color_b: int = 255, color_a: int = 255,
-                    h_align: int = 1, v_align: int = 1) -> int:
-    """Attach a cc.Label to a node. h_align/v_align: 0=left/top 1=center 2=right/bottom."""
+                    h_align: int = 1, v_align: int = 1,
+                    overflow: int = 0, enable_wrap: bool = False, line_height: int = 0,
+                    enable_outline: bool = True, outline_width: int = 3,
+                    cache_mode: int = 0) -> int:
+    """Attach cc.Label. overflow: 0=NONE 1=CLAMP 2=SHRINK 3=RESIZE_HEIGHT.
+    cache_mode: 0=NONE 1=BITMAP 2=CHAR. CLAMP truncates, SHRINK auto-shrinks font."""
     return sb.add_label(scene_path, node_id, text, font_size,
-                        (color_r, color_g, color_b, color_a), h_align, v_align)
+                        (color_r, color_g, color_b, color_a), h_align, v_align,
+                        overflow, enable_wrap, line_height, enable_outline,
+                        (0, 0, 0, 255), outline_width, cache_mode)
 
 
 @mcp.tool()
@@ -402,8 +408,35 @@ def cocos_constants() -> dict:
             "LEFT": 0, "CENTER": 1, "RIGHT": 2,
             "TOP": 0, "MIDDLE": 1, "BOTTOM": 2,
         },
+        "label_overflow": {
+            "NONE": 0, "CLAMP": 1, "SHRINK": 2, "RESIZE_HEIGHT": 3,
+        },
+        "label_cache_mode": {
+            "NONE": 0, "BITMAP": 1, "CHAR": 2,
+        },
+        "sprite_type": {
+            "SIMPLE": 0, "SLICED": 1, "TILED": 2, "FILLED": 3,
+        },
         "sprite_size_mode": {
             "CUSTOM": 0, "TRIMMED": 1, "RAW": 2,
+        },
+        "sprite_fill_type": {
+            "HORIZONTAL": 0, "VERTICAL": 1, "RADIAL": 2,
+        },
+        "rigidbody2d_type": {
+            "STATIC": 0, "KINEMATIC": 1, "DYNAMIC": 2,
+        },
+        "button_transition": {
+            "NONE": 0, "COLOR": 1, "SCALE": 2, "SPRITE": 3,
+        },
+        "layout_type": {
+            "NONE": 0, "HORIZONTAL": 1, "VERTICAL": 2, "GRID": 3,
+        },
+        "mask_type": {
+            "RECT": 0, "ELLIPSE": 1, "GRAPHICS_STENCIL": 2, "SPRITE_STENCIL": 3,
+        },
+        "widget_align_mode": {
+            "ONCE": 0, "ON_WINDOW_RESIZE": 1, "ALWAYS": 2,
         },
         "widget_align_flags": {
             "TOP": 1, "MIDDLE": 2, "BOTTOM": 4,
