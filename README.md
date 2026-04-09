@@ -2,7 +2,16 @@
 
 无头 Cocos Creator 3.8 MCP 服务器 —— 让 AI 在**不打开编辑器**的情况下自主开发完整的 Cocos 游戏。
 
-## 安装
+## 一键安装
+
+```bash
+curl -sSL https://gitee.com/csbcsb/cocos-mcp/raw/main/install.sh | bash
+```
+
+需要：[git](https://git-scm.com/) + [uv](https://docs.astral.sh/uv/) + [Claude Code](https://claude.ai/claude-code)。安装完重启 Claude Code 即可。
+
+<details>
+<summary>手动安装</summary>
 
 ```bash
 # 1. 克隆
@@ -19,6 +28,8 @@ claude mcp add -s user cocos-mcp -- bash ~/.claude/mcp-servers/cocos-mcp/run.sh
 
 # 4. 重启 Claude Code
 ```
+
+</details>
 
 ## 前置要求
 
