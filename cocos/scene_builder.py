@@ -912,6 +912,25 @@ def add_polygon_collider2d(scene_path: str | Path, node_id: int,
 
 # ----------- UI helpers -----------
 
+def make_event_handler(target_node_id: int, component_name: str, handler: str,
+                       custom_data: str = "") -> dict:
+    """Build a serialized cc.EventHandler for any component event binding.
+
+    Works with: ScrollView.scrollEvents, Toggle.checkEvents,
+    Slider.slideEvents, EditBox.editingDidBegan/editingReturn, etc.
+
+    Same format as cc.ClickEvent but uses cc.EventHandler type.
+    """
+    return {
+        "__type__": "cc.EventHandler",
+        "target": _ref(target_node_id),
+        "_componentId": "",
+        "component": component_name,
+        "handler": handler,
+        "customEventData": custom_data,
+    }
+
+
 def make_click_event(target_node_id: int, component_name: str, handler: str,
                      custom_data: str = "") -> dict:
     """Build a serialized cc.ClickEvent for Button.clickEvents.
@@ -961,6 +980,7 @@ def add_button(scene_path: str | Path, node_id: int,
         "_name": "", "_objFlags": 0,
         "node": _ref(node_id), "_enabled": True, "__prefab": None,
         "_id": _nid("btn"),
+        "target": _ref(node_id),  # target = self node (required for SCALE transition)
         "transition": transition,
         "zoomScale": zoom_scale,
         "_N$normalColor": _color(*normal_color),
@@ -1013,56 +1033,116 @@ def add_progress_bar(scene_path: str | Path, node_id: int,
     return add_component(scene_path, node_id, "cc.ProgressBar", props)
 
 
+def _serialize_events(s: list, events: list[dict] | None) -> list:
+    """Serialize event handler dicts into scene array, return list of refs."""
+    if not events:
+        return []
+    refs = []
+    for evt in events:
+        s.append(evt)
+        refs.append(_ref(len(s) - 1))
+    return refs
+
+
 def add_scroll_view(scene_path: str | Path, node_id: int,
                     content_id: int | None = None,
                     horizontal: bool = False, vertical: bool = True,
                     inertia: bool = True, brake: float = 0.75,
-                    elastic: bool = True, bounce_duration: float = 0.23) -> int:
-    """Attach cc.ScrollView."""
-    props: dict[str, Any] = {
+                    elastic: bool = True, bounce_duration: float = 0.23,
+                    scroll_events: list[dict] | None = None) -> int:
+    """Attach cc.ScrollView. scroll_events: list from make_event_handler()."""
+    s = _load_scene(scene_path)
+    ser_events = _serialize_events(s, scroll_events)
+    obj: dict[str, Any] = {
+        "__type__": "cc.ScrollView",
+        "_name": "", "_objFlags": 0,
+        "node": _ref(node_id), "_enabled": True, "__prefab": None,
+        "_id": _nid("scv"),
         "horizontal": horizontal,
         "vertical": vertical,
         "inertia": inertia,
         "brake": brake,
         "elastic": elastic,
         "bounceDuration": bounce_duration,
+        "scrollEvents": ser_events,
     }
     if content_id is not None:
-        props["content"] = content_id  # int → auto ref
-    return add_component(scene_path, node_id, "cc.ScrollView", props)
+        obj["content"] = _ref(content_id)
+    cid = _attach_component(s, node_id, obj)
+    _save_scene(scene_path, s)
+    return cid
 
 
 def add_toggle(scene_path: str | Path, node_id: int,
-               is_checked: bool = False, transition: int = 2) -> int:
-    """Attach cc.Toggle."""
-    return add_component(scene_path, node_id, "cc.Toggle", {
+               is_checked: bool = False, transition: int = 2,
+               check_events: list[dict] | None = None) -> int:
+    """Attach cc.Toggle. check_events: list from make_event_handler()."""
+    s = _load_scene(scene_path)
+    ser_events = _serialize_events(s, check_events)
+    obj = {
+        "__type__": "cc.Toggle",
+        "_name": "", "_objFlags": 0,
+        "node": _ref(node_id), "_enabled": True, "__prefab": None,
+        "_id": _nid("tgl"),
+        "target": _ref(node_id),
         "isChecked": is_checked,
         "transition": transition,
         "_interactable": True,
-    })
+        "checkEvents": ser_events,
+    }
+    cid = _attach_component(s, node_id, obj)
+    _save_scene(scene_path, s)
+    return cid
 
 
 def add_editbox(scene_path: str | Path, node_id: int,
                 placeholder: str = "Enter text...",
                 max_length: int = -1, input_mode: int = 6,
-                return_type: int = 0) -> int:
-    """Attach cc.EditBox. input_mode: 0=ANY, 6=SINGLE_LINE, ..."""
-    return add_component(scene_path, node_id, "cc.EditBox", {
+                return_type: int = 0,
+                editing_did_began: list[dict] | None = None,
+                editing_did_ended: list[dict] | None = None,
+                editing_return: list[dict] | None = None,
+                text_changed: list[dict] | None = None) -> int:
+    """Attach cc.EditBox. All event params accept lists from make_event_handler()."""
+    s = _load_scene(scene_path)
+    obj = {
+        "__type__": "cc.EditBox",
+        "_name": "", "_objFlags": 0,
+        "node": _ref(node_id), "_enabled": True, "__prefab": None,
+        "_id": _nid("edb"),
         "placeholder": placeholder,
         "maxLength": max_length,
         "inputMode": input_mode,
         "returnType": return_type,
         "_string": "",
-    })
+        "editingDidBegan": _serialize_events(s, editing_did_began),
+        "editingDidEnded": _serialize_events(s, editing_did_ended),
+        "editingReturn": _serialize_events(s, editing_return),
+        "textChanged": _serialize_events(s, text_changed),
+    }
+    cid = _attach_component(s, node_id, obj)
+    _save_scene(scene_path, s)
+    return cid
 
 
 def add_slider(scene_path: str | Path, node_id: int,
-               direction: int = 0, progress: float = 0.5) -> int:
-    """Attach cc.Slider. direction: 0=Horizontal, 1=Vertical."""
-    return add_component(scene_path, node_id, "cc.Slider", {
+               direction: int = 0, progress: float = 0.5,
+               slide_events: list[dict] | None = None) -> int:
+    """Attach cc.Slider. slide_events: list from make_event_handler()."""
+    s = _load_scene(scene_path)
+    ser_events = _serialize_events(s, slide_events)
+    obj = {
+        "__type__": "cc.Slider",
+        "_name": "", "_objFlags": 0,
+        "node": _ref(node_id), "_enabled": True, "__prefab": None,
+        "_id": _nid("sld"),
         "direction": direction,
         "progress": progress,
-    })
+        "slideEvents": ser_events,
+    }
+    cid = _attach_component(s, node_id, obj)
+    _save_scene(scene_path, s)
+    return cid
 
 
 # ----------- audio -----------

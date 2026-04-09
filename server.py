@@ -595,9 +595,10 @@ def cocos_add_scroll_view(scene_path: str, node_id: int,
 
 @mcp.tool()
 def cocos_add_toggle(scene_path: str, node_id: int,
-                     is_checked: bool = False, transition: int = 2) -> int:
-    """Attach cc.Toggle. transition: 0=NONE, 1=COLOR, 2=SCALE, 3=SPRITE."""
-    return sb.add_toggle(scene_path, node_id, is_checked, transition)
+                     is_checked: bool = False, transition: int = 2,
+                     check_events: list[dict] | None = None) -> int:
+    """Attach cc.Toggle. check_events: list from cocos_make_event_handler()."""
+    return sb.add_toggle(scene_path, node_id, is_checked, transition, check_events)
 
 
 @mcp.tool()
@@ -612,9 +613,10 @@ def cocos_add_editbox(scene_path: str, node_id: int,
 
 @mcp.tool()
 def cocos_add_slider(scene_path: str, node_id: int,
-                     direction: int = 0, progress: float = 0.5) -> int:
-    """Attach cc.Slider. direction: 0=Horizontal, 1=Vertical."""
-    return sb.add_slider(scene_path, node_id, direction, progress)
+                     direction: int = 0, progress: float = 0.5,
+                     slide_events: list[dict] | None = None) -> int:
+    """Attach cc.Slider. slide_events: list from cocos_make_event_handler()."""
+    return sb.add_slider(scene_path, node_id, direction, progress, slide_events)
 
 
 # =====================================================================
@@ -828,6 +830,21 @@ def cocos_create_animation_clip(project_path: str, clip_name: str,
     """
     return cp.create_animation_clip(project_path, clip_name, duration, sample,
                                     tracks, rel_dir)
+
+
+@mcp.tool()
+def cocos_make_event_handler(scene_path: str, target_node_id: int,
+                             component_name: str, handler: str,
+                             custom_data: str = "") -> dict:
+    """Build a cc.EventHandler dict for component event bindings.
+
+    Use with: cocos_add_scroll_view(scroll_events=[...]),
+    cocos_add_toggle(check_events=[...]), cocos_add_slider(slide_events=[...]),
+    cocos_add_editbox(editing_return=[...]).
+
+    Same pattern as cocos_make_click_event but for non-Button components.
+    """
+    return sb.make_event_handler(target_node_id, component_name, handler, custom_data)
 
 
 @mcp.tool()
