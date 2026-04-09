@@ -1029,7 +1029,7 @@ def add_progress_bar(scene_path: str | Path, node_id: int,
         "reverse": reverse,
     }
     if bar_sprite_id is not None:
-        props["_N$barSprite"] = bar_sprite_id  # int → auto ref
+        props["_N$barSprite"] = _ref(bar_sprite_id)
     return add_component(scene_path, node_id, "cc.ProgressBar", props)
 
 
