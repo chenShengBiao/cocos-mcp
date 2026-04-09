@@ -663,11 +663,13 @@ def list_nodes(scene_path: str | Path) -> list[dict]:
 
 
 def validate_scene(scene_path: str | Path) -> dict:
-    """Sanity-check a scene file: ref ranges, type tags, parent linkage."""
+    """Sanity-check a scene file: ref ranges, type tags, parent linkage,
+    Canvas-Camera binding, and UI node ancestry."""
     s = _load_scene(scene_path)
     issues = []
     n = len(s)
 
+    # --- 1. Check all __id__ refs are in range and have __type__ ---
     def walk_refs(obj, path=""):
         if isinstance(obj, dict):
             if "__id__" in obj and isinstance(obj["__id__"], int):
@@ -691,6 +693,74 @@ def validate_scene(scene_path: str | Path) -> dict:
         if "__type__" not in o:
             issues.append(f"[{i}]: missing __type__")
         walk_refs(o, f"[{i}]")
+
+    # --- 2. Canvas must have a valid Camera ref ---
+    for i, o in enumerate(s):
+        if not isinstance(o, dict):
+            continue
+        if o.get("__type__") == "cc.Canvas":
+            cam_ref = o.get("_cameraComponent")
+            if cam_ref is None or not isinstance(cam_ref, dict):
+                issues.append(f"[{i}] cc.Canvas: _cameraComponent is null (will crash on touch)")
+            elif "__id__" in cam_ref:
+                cid = cam_ref["__id__"]
+                if cid < 0 or cid >= n:
+                    issues.append(f"[{i}] cc.Canvas: _cameraComponent __id__ {cid} out of range")
+                elif s[cid].get("__type__") != "cc.Camera":
+                    issues.append(f"[{i}] cc.Canvas: _cameraComponent points to {s[cid].get('__type__')} not cc.Camera")
+
+    # --- 3. UI nodes (with UITransform) should be under a Canvas ---
+    canvas_node_ids = set()
+    for i, o in enumerate(s):
+        if isinstance(o, dict) and o.get("__type__") == "cc.Canvas":
+            node_ref = o.get("node")
+            if node_ref and "__id__" in node_ref:
+                canvas_node_ids.add(node_ref["__id__"])
+
+    def _is_under_canvas(node_id: int, visited: set | None = None) -> bool:
+        if visited is None:
+            visited = set()
+        if node_id in visited:
+            return False
+        visited.add(node_id)
+        if node_id in canvas_node_ids:
+            return True
+        node = s[node_id] if 0 <= node_id < n else None
+        if not node or not isinstance(node, dict):
+            return False
+        parent_ref = node.get("_parent")
+        if parent_ref and isinstance(parent_ref, dict) and "__id__" in parent_ref:
+            return _is_under_canvas(parent_ref["__id__"], visited)
+        return False
+
+    for i, o in enumerate(s):
+        if not isinstance(o, dict) or o.get("__type__") != "cc.UITransform":
+            continue
+        node_ref = o.get("node")
+        if not node_ref or "__id__" not in node_ref:
+            continue
+        node_id = node_ref["__id__"]
+        if not _is_under_canvas(node_id):
+            node_name = s[node_id].get("_name", "?") if 0 <= node_id < n else "?"
+            issues.append(f"[{i}] UITransform on node '{node_name}'(#{node_id}) is NOT under any Canvas (will crash on touch)")
+
+    # --- 4. Check for bare int values in component ref fields ---
+    ref_field_map = {
+        "cc.Button": ["target"],
+        "cc.Toggle": ["target"],
+        "cc.Canvas": ["_cameraComponent"],
+        "cc.ProgressBar": ["_N$barSprite"],
+        "cc.ScrollView": ["content"],
+    }
+    for i, o in enumerate(s):
+        if not isinstance(o, dict):
+            continue
+        typ = o.get("__type__", "")
+        if typ in ref_field_map:
+            for field in ref_field_map[typ]:
+                val = o.get(field)
+                if isinstance(val, int):
+                    issues.append(f"[{i}] {typ}.{field} is bare int {val} (should be {{__id__: {val}}})")
 
     return {
         "valid": len(issues) == 0,
