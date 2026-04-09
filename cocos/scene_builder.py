@@ -1665,3 +1665,68 @@ def add_safe_area(scene_path: str | Path, node_id: int) -> int:
     Usually placed on the root UI node.
     """
     return add_component(scene_path, node_id, "cc.SafeArea", {})
+
+
+# ----------- PageView -----------
+
+def add_page_view(scene_path: str | Path, node_id: int,
+                  content_id: int | None = None,
+                  direction: int = 0,
+                  scroll_threshold: float = 0.5,
+                  page_turning_speed: float = 0.3,
+                  indicator_id: int | None = None,
+                  auto_page_turning_threshold: float = 100) -> int:
+    """Attach cc.PageView (swipeable page container).
+
+    direction: 0=Horizontal, 1=Vertical.
+    Used for: tutorials, card galleries, level select screens.
+    """
+    props: dict = {
+        "direction": direction,
+        "scrollThreshold": scroll_threshold,
+        "pageTurningSpeed": page_turning_speed,
+        "autoPageTurningThreshold": auto_page_turning_threshold,
+        "inertia": True,
+        "elastic": True,
+        "bounceDuration": 0.23,
+    }
+    if content_id is not None:
+        props["content"] = {"__id__": content_id}
+    if indicator_id is not None:
+        props["indicator"] = {"__id__": indicator_id}
+    return add_component(scene_path, node_id, "cc.PageView", props)
+
+
+# ----------- ToggleContainer -----------
+
+def add_toggle_container(scene_path: str | Path, node_id: int,
+                         allow_switch_off: bool = False) -> int:
+    """Attach cc.ToggleContainer (radio button group).
+
+    Child Toggle nodes are mutually exclusive — only one can be checked at a time.
+    Set allow_switch_off=True to allow all unchecked.
+    """
+    return add_component(scene_path, node_id, "cc.ToggleContainer", {
+        "allowSwitchOff": allow_switch_off,
+    })
+
+
+# ----------- MotionStreak -----------
+
+def add_motion_streak(scene_path: str | Path, node_id: int,
+                      fade_time: float = 1.0,
+                      min_seg: float = 1,
+                      stroke: float = 64,
+                      color: tuple = (255, 255, 255, 255),
+                      fast_mode: bool = False) -> int:
+    """Attach cc.MotionStreak (trail/streak effect behind moving objects).
+
+    Used for: sword trails, shooting stars, finger swipe effects.
+    """
+    return add_component(scene_path, node_id, "cc.MotionStreak", {
+        "_fadeTime": fade_time,
+        "_minSeg": min_seg,
+        "_stroke": stroke,
+        "_color": _color(*color),
+        "_fastMode": fast_mode,
+    })

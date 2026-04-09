@@ -405,3 +405,30 @@ def get_engine_modules(project_path: str | Path) -> dict:
         "modules": modules,
         "includeModules": include,
     }
+
+
+def set_physics_2d_config(project_path: str | Path,
+                          gravity_x: float = 0, gravity_y: float = -320,
+                          fixed_time_step: float = 1/60,
+                          velocity_iterations: int = 10,
+                          position_iterations: int = 10,
+                          allow_sleep: bool = True) -> dict:
+    """Configure 2D physics system in project settings.
+
+    IMPORTANT: Cocos Creator's default gravity is (0, -320) in pixel units.
+    If your physics objects don't fall, check this setting.
+
+    This writes to settings/v2/packages/project.json under 'physics'.
+    """
+    settings_path, data = _read_project_settings(project_path)
+    physics = data.setdefault("physics", {})
+    physics["gravity"] = {"x": gravity_x, "y": gravity_y}
+    physics["fixedTimeStep"] = fixed_time_step
+    physics["velocityIterations"] = velocity_iterations
+    physics["positionIterations"] = position_iterations
+    physics["allowSleep"] = allow_sleep
+    _write_project_settings(settings_path, data)
+    return {
+        "settings_path": str(settings_path),
+        "physics": physics,
+    }

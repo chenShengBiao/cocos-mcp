@@ -1044,6 +1044,49 @@ def cocos_clean_project(project_path: str, level: str = "default") -> dict:
     return cb.clean_project(project_path, level)
 
 
+@mcp.tool()
+def cocos_set_physics_2d_config(project_path: str,
+                                gravity_x: float = 0, gravity_y: float = -320,
+                                fixed_time_step: float = 0.016667,
+                                velocity_iterations: int = 10,
+                                position_iterations: int = 10,
+                                allow_sleep: bool = True) -> dict:
+    """Configure 2D physics: gravity, timestep, solver iterations.
+
+    Default gravity is (0, -320). Must call this before build if using physics.
+    """
+    return cb.set_physics_2d_config(project_path, gravity_x, gravity_y,
+                                     fixed_time_step, velocity_iterations,
+                                     position_iterations, allow_sleep)
+
+
+@mcp.tool()
+def cocos_add_page_view(scene_path: str, node_id: int,
+                        content_id: int | None = None,
+                        direction: int = 0, scroll_threshold: float = 0.5,
+                        page_turning_speed: float = 0.3) -> int:
+    """Attach cc.PageView (swipeable pages). direction: 0=H, 1=V."""
+    return sb.add_page_view(scene_path, node_id, content_id, direction,
+                            scroll_threshold, page_turning_speed)
+
+
+@mcp.tool()
+def cocos_add_toggle_container(scene_path: str, node_id: int,
+                               allow_switch_off: bool = False) -> int:
+    """Attach cc.ToggleContainer (radio group). Children are mutually exclusive."""
+    return sb.add_toggle_container(scene_path, node_id, allow_switch_off)
+
+
+@mcp.tool()
+def cocos_add_motion_streak(scene_path: str, node_id: int,
+                            fade_time: float = 1.0, stroke: float = 64,
+                            color_r: int = 255, color_g: int = 255,
+                            color_b: int = 255, color_a: int = 255) -> int:
+    """Attach cc.MotionStreak (trail effect). For sword trails, shooting stars."""
+    return sb.add_motion_streak(scene_path, node_id, fade_time, 1, stroke,
+                                (color_r, color_g, color_b, color_a))
+
+
 # =====================================================================
 # Engine module configuration
 # =====================================================================
