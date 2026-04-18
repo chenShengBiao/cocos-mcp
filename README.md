@@ -1,28 +1,40 @@
 # cocos-mcp
 
+> **🔒 Private · Closed Source**
+> 商用许可项目，源码不公开。如需访问、试用或合作请联系作者。
+>
+> 当前定位：内部工具 / Private Alpha，正在向商业化产品演进中。
+
 无头 Cocos Creator 3.8 MCP 服务器 —— 让 AI 在**不打开编辑器**的情况下自主开发完整的 Cocos 游戏。
 
-## 一键安装
+---
+
+## 是什么
+
+一个 Python MCP server，把 Cocos Creator 3.8 的项目操作（场景搭建、组件配置、资源导入、headless 构建、平台发布）封装成 **109 个结构化工具**，给 AI 客户端（Claude Code / Cursor / Claude Desktop / 自部署 OpenAI 兼容客户端）调用。
+
+实际效果：用户跟 AI 说一句"做一个 Flappy Bird"，AI 30 分钟内交付一个能跑能玩的游戏，全程不需要打开 Cocos Creator GUI、不需要写一行 .ts 代码。
+
+技术栈完全独立 —— 直接读写 .scene/.prefab JSON、调 Cocos CLI 构建、生成 .meta、跑跨平台预览 server。
+
+---
+
+## 接入方式
+
+> 仓库为 private。需要先取得访问权限（联系作者拿 access token / 加入协作者）再安装。
+
+获得访问权限后：
 
 ```bash
-curl -sSL https://gitee.com/csbcsb/cocos-mcp/raw/main/install.sh | bash
-```
-
-需要：[git](https://git-scm.com/) + [uv](https://docs.astral.sh/uv/) + [Claude Code](https://claude.ai/claude-code)。安装完重启 Claude Code 即可。
-
-<details>
-<summary>手动安装</summary>
-
-```bash
-# 1. 克隆
+# 1. 克隆（用你的访问凭证）
 git clone https://gitee.com/csbcsb/cocos-mcp.git ~/.claude/mcp-servers/cocos-mcp
 
 # 2. 装依赖
 cd ~/.claude/mcp-servers/cocos-mcp
 uv venv .venv --python 3.12
 source .venv/bin/activate
-uv pip install .                   # 走 pyproject.toml（单一依赖来源）
-# 开发：uv pip install ".[dev]"   # 加上 pytest / ruff / mypy
+uv pip install .
+# 开发：uv pip install ".[dev]"
 
 # 3. 注册到 Claude Code
 claude mcp add -s user cocos-mcp -- bash ~/.claude/mcp-servers/cocos-mcp/run.sh
@@ -30,12 +42,10 @@ claude mcp add -s user cocos-mcp -- bash ~/.claude/mcp-servers/cocos-mcp/run.sh
 # 4. 重启 Claude Code
 ```
 
-</details>
+## 前置环境
 
-## 前置要求
-
-- [Cocos Creator](https://www.cocos.com/creator-download) 3.x（测试过 3.8.6，其它 3.x 应该都能用）
-- Python 3.11+（`uv` 或 `pip` 均可）
+- [Cocos Creator](https://www.cocos.com/creator-download) 3.x（测试过 3.8.6）
+- Python 3.11+
 - 任何支持 MCP 的 AI 客户端（Claude Code / Claude Desktop / Cursor 等）
 
 ## 使用
@@ -50,26 +60,21 @@ claude mcp add -s user cocos-mcp -- bash ~/.claude/mcp-servers/cocos-mcp/run.sh
 
 Claude 会自动调用 109+ MCP 工具完成全流程：初始化项目 → 写脚本 → 构建场景 → headless 编译 → 浏览器预览 → 发布到 iOS/Android/微信小游戏。**全程不用打开 Cocos Creator 编辑器。**
 
-## 示例
+## 内置示例
 
-仓库自带 3 个可一键运行的示例：
+仓库自带 3 个一键运行的演示项目（验证整个工具链通畅）：
 
 ```bash
-# Flappy Bird
 .venv/bin/python examples/flappy-bird/build_flappy.py /tmp/flappy --port 8080
-
-# 点击计数器
 .venv/bin/python examples/click-counter/build_click_counter.py /tmp/click --port 8081
-
-# 弹球打砖块（含 Box2D 物理）
 .venv/bin/python examples/breakout/build_breakout.py
 ```
 
-运行后打开 `http://localhost:8080` 即可在浏览器里玩。
+运行后打开 `http://localhost:8080` 即可玩。
 
 ## 109+ 个工具
 
-> 启动时 stderr 会打印实际注册数量（`cocos-mcp: N tools registered…`）；下表是大类别概览，具体名单以源码为准。
+> 启动时 stderr 打印实际注册数量（`cocos-mcp: N tools registered…`）；下表是大类别概览。
 
 | 类别 | 数量 | 包含 |
 |---|---|---|
@@ -158,11 +163,11 @@ cocos-mcp/
 │       ├── media.py                  # audio / anim / particle / Spine / DB / TiledMap / 渲染扩展 / VideoPlayer
 │       └── build.py                  # 构建 / 预览 / 平台-发布配置
 ├── examples/                         # 3 个一键示例
-├── tests/                            # 166 个 pytest 单元测试，70%+ 覆盖率
+├── tests/                            # 166 个 pytest 单元测试，72% 覆盖率
 ├── .github/workflows/test.yml        # Ubuntu / macOS / Windows × Python 3.11 / 3.12
 ├── Dockerfile
 ├── CHANGELOG.md
-└── pyproject.toml                    # 单一依赖来源（含 [dev] extras）
+└── pyproject.toml
 ```
 
 ## 质量保障
@@ -170,9 +175,20 @@ cocos-mcp/
 - **166 个 pytest 测试**，本地 < 5s 跑完。覆盖：UUID、meta、scene_builder、batch、9 个 Joint、prefab 实例化、所有发布工具、AI 素材生成（HTTP mock）、chroma key、跨平台预览。
 - **CI**：GitHub Actions matrix —— Ubuntu / macOS / Windows × Python 3.11 / 3.12，每个组合都跑 `ruff` + `mypy` + `pytest`。
 - **类型检查**：`mypy cocos/` 0 errors。
-- **Lint**：`ruff check` 0 errors（pyproject.toml 里配置了 `ignore = ["E501", "RUF002", "RUF003"]`，因为代码里有大量中文注释）。
-- **跨平台**：所有外部进程调用走 `sys.executable`、socket、`tempfile.gettempdir()`。Windows 的 preview server 也能跑。
+- **Lint**：`ruff check` 0 errors。
+- **跨平台**：所有外部进程调用走 `sys.executable` / socket / `tempfile.gettempdir()`，Windows / macOS / Linux 都能跑。
 
-## 协议
+---
 
-MIT
+## 协议 / License
+
+**Proprietary · All Rights Reserved · Copyright © heitugongzuoshi**
+
+未经书面授权，**不得复制、修改、分发、二次发布或将本项目用于任何商业用途**。
+仅授权给已被邀请的协作者用于内部评估、试用与开发。
+
+如需获取使用授权、商业合作、二次开发或定制服务，请通过以下方式联系：
+
+- Email: 2282059276@qq.com
+
+> 旧版本（v1.1.0 及之前）以 MIT 协议发布，相关分发已停止。本仓库当前版本 (Unreleased / 1.2-dev) 起转为闭源。

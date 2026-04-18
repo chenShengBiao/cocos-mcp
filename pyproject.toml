@@ -1,12 +1,21 @@
 [project]
 name = "cocos-mcp"
-version = "1.1.0"
-description = "Headless Cocos Creator 3.8 MCP server — 90+ tools for AI-autonomous game development"
+version = "1.2.0.dev0"
+description = "Headless Cocos Creator 3.8 MCP server — 109+ tools for AI-autonomous game development (Proprietary)"
 readme = "README.md"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 authors = [{name = "heitugongzuoshi", email = "2282059276@qq.com"}]
 keywords = ["cocos", "cocos-creator", "mcp", "game-dev", "headless", "ai"]
+classifiers = [
+    "License :: Other/Proprietary License",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Software Development :: Code Generators",
+]
 dependencies = [
     "mcp[cli]>=1.2.0",
     "Pillow>=10.0.0",

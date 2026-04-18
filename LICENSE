@@ -1,21 +1,54 @@
-MIT License
+PROPRIETARY SOFTWARE LICENSE
 
-Copyright (c) 2026 heitugongzuoshi
+Copyright (c) 2026 heitugongzuoshi. All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software and its associated documentation, source code, assets, and
+all related materials (collectively, the "Software") are the proprietary
+and confidential property of heitugongzuoshi ("the Author").
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+NO LICENSE IS GRANTED to any party except by separate, signed written
+agreement with the Author. In the absence of such agreement, the
+following acts are EXPRESSLY PROHIBITED:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  1. Copying, reproducing, or duplicating the Software in whole or in
+     part, in any form or by any means;
+  2. Modifying, adapting, translating, or creating derivative works
+     based on the Software;
+  3. Distributing, sublicensing, lending, leasing, renting, selling,
+     or otherwise transferring the Software or any rights therein to
+     any third party;
+  4. Reverse engineering, decompiling, disassembling, or otherwise
+     attempting to derive the source code or underlying ideas from
+     compiled or distributed forms of the Software;
+  5. Using the Software for any commercial purpose, including but not
+     limited to providing a hosted service, integrating into a paid
+     product, or generating revenue from games or other works produced
+     with the Software;
+  6. Removing, obscuring, or altering any copyright, trademark, or
+     other proprietary notices contained in the Software;
+  7. Publishing, disclosing, or making the Software publicly available
+     in any form, including via public source-code hosting platforms.
+
+ACCESS to the Software (including via repository invitation, download
+link, or installer) does not constitute a license to use the Software
+beyond the explicit terms of the agreement under which access was
+granted. Recipients of access for evaluation, testing, or collaboration
+purposes are limited to those purposes and must not exceed them.
+
+PRIOR VERSIONS: Versions of this Software released publicly under the
+MIT License prior to and including version 1.1.0 remain available under
+the MIT License terms applicable at the time of their release. Those
+terms apply ONLY to the specific code as it existed in those public
+releases and do NOT extend to subsequent versions, modifications, or
+additions made after the transition to this proprietary license.
+
+NO WARRANTY: THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM,
+DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+CONTACT for licensing inquiries:
+  Email: 2282059276@qq.com
