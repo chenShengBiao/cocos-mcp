@@ -1,7 +1,7 @@
 [project]
 name = "cocos-mcp"
-version = "1.0.0"
-description = "Headless Cocos Creator 3.8 MCP server — 71 tools for AI-autonomous game development"
+version = "1.1.0"
+description = "Headless Cocos Creator 3.8 MCP server — 90+ tools for AI-autonomous game development"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -12,9 +12,70 @@ dependencies = [
     "Pillow>=10.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.5",
+    "mypy>=1.8",
+]
+
 [project.urls]
 Repository = "https://gitee.com/csbcsb/cocos-mcp"
+Changelog = "https://gitee.com/csbcsb/cocos-mcp/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["server"]
+
+[tool.setuptools.packages.find]
+include = ["cocos*"]
+
+# ----------------------------- ruff -----------------------------
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["examples/flappy-bird/scripts"]
+
+[tool.ruff.lint]
+# Pragmatic defaults — start strict-ish, tighten later.
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "E501",   # line length (handled by formatter; many JSON literals are long)
+    "B008",   # FastMCP relies on default-arg factories
+    "SIM108", # ternary suggestions hurt readability of scene-builder dict literals
+    "SIM114", # combining if-branches with `or` hurts readability of platform switches
+    "SIM115", # `with open` rewrites are noisy in JSON-roundtrip helpers
+    "RUF001", # ambiguous unicode in string literals (Chinese punctuation is intentional)
+    "RUF002", # ambiguous unicode in docstrings
+    "RUF003", # ambiguous unicode in comments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "E402"]
+"examples/*" = ["E402"]
+# __init__.py modules are intentional re-export facades — silence "imported but unused".
+"**/__init__.py" = ["F401", "I001"]
+# Batch op switch catches all errors on purpose to report per-op status.
+"cocos/scene_builder/batch.py" = ["BLE001"]
+
+# ----------------------------- mypy -----------------------------
+[tool.mypy]
+python_version = "3.11"
+files = ["cocos", "server.py"]
+ignore_missing_imports = true   # mcp[cli] / PIL stubs vary by version
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+# Phase-1 leniency — flip on once the codebase is annotated:
+disallow_untyped_defs = false
+strict_optional = true
+
+# ----------------------------- pytest ----------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
