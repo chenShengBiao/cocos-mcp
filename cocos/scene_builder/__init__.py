@@ -16,332 +16,44 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .meta_util import scene_meta, prefab_meta
-from .uuid_util import new_uuid
+from ..meta_util import prefab_meta, scene_meta
+from ..uuid_util import new_uuid
+from ._helpers import (
+    LAYER_DEFAULT,
+    LAYER_UI_2D,
+    _attach_component,
+    _auto_wrap_value,
+    _color,
+    _ensure_uitransform,
+    _has_uitransform,
+    _load_scene,
+    _make_ambient_info,
+    _make_camera,
+    _make_canvas,
+    _make_graphics,
+    _make_label,
+    _make_node,
+    _make_script_component,
+    _make_shadows_info,
+    _make_skybox_info,
+    _make_sprite,
+    _make_uitransform,
+    _make_widget,
+    _nid,
+    _quat,
+    _rect,
+    _ref,
+    _save_scene,
+    _size,
+    _UI_RENDER_TYPES,
+    _vec2,
+    _vec3,
+    _vec4,
+    _wrap_props,
+)
+from .batch import batch_ops  # re-exported as sb.batch_ops
 
-# Cocos Creator built-in layer bitmasks (from default layer config)
-LAYER_UI_2D = 33554432  # bit 25
-LAYER_DEFAULT = 1073741824  # bit 30 (used by Camera)
-
-
-# ----------- primitive value helpers -----------
-
-def _vec3(x: float = 0, y: float = 0, z: float = 0) -> dict:
-    return {"__type__": "cc.Vec3", "x": x, "y": y, "z": z}
-
-
-def _quat(x: float = 0, y: float = 0, z: float = 0, w: float = 1) -> dict:
-    return {"__type__": "cc.Quat", "x": x, "y": y, "z": z, "w": w}
-
-
-def _vec2(x: float = 0, y: float = 0) -> dict:
-    return {"__type__": "cc.Vec2", "x": x, "y": y}
-
-
-def _vec4(x: float = 0, y: float = 0, z: float = 0, w: float = 0) -> dict:
-    return {"__type__": "cc.Vec4", "x": x, "y": y, "z": z, "w": w}
-
-
-def _size(w: float = 0, h: float = 0) -> dict:
-    return {"__type__": "cc.Size", "width": w, "height": h}
-
-
-def _color(r: int = 255, g: int = 255, b: int = 255, a: int = 255) -> dict:
-    return {"__type__": "cc.Color", "r": r, "g": g, "b": b, "a": a}
-
-
-def _rect(x: float = 0, y: float = 0, w: float = 1, h: float = 1) -> dict:
-    return {"__type__": "cc.Rect", "x": x, "y": y, "width": w, "height": h}
-
-
-def _ref(idx: int) -> dict:
-    return {"__id__": idx}
-
-
-_id_counter = [0]
-def _nid(prefix: str = "n") -> str:
-    """Generate a 22-char Cocos node `_id` string (just needs to be unique)."""
-    _id_counter[0] += 1
-    s = f"{prefix}{_id_counter[0]:06d}xxxxxxxxxxxxxxxx"
-    return s[:22]
-
-
-# ----------- factory: low-level object dicts -----------
-
-def _make_node(name: str, parent_idx: int | None, lpos=(0, 0, 0), lscale=(1, 1, 1),
-               layer: int = LAYER_UI_2D, active: bool = True) -> dict:
-    return {
-        "__type__": "cc.Node",
-        "_name": name,
-        "_objFlags": 0,
-        "_parent": _ref(parent_idx) if parent_idx is not None else None,
-        "_children": [],
-        "_active": active,
-        "_components": [],
-        "_prefab": None,
-        "_lpos": _vec3(*lpos),
-        "_lrot": _quat(),
-        "_lscale": _vec3(*lscale),
-        "_layer": layer,
-        "_euler": _vec3(),
-        "_id": _nid(name[:6] if name else "node"),
-    }
-
-
-def _make_uitransform(node_idx: int, w: float, h: float, ax: float = 0.5, ay: float = 0.5) -> dict:
-    return {
-        "__type__": "cc.UITransform",
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_priority": 0,
-        "_contentSize": _size(w, h),
-        "_anchorPoint": _vec2(ax, ay),
-        "_id": _nid("uit"),
-    }
-
-
-def _make_camera(node_idx: int, ortho_height: float = 320, clear_color=(0, 0, 0, 0)) -> dict:
-    return {
-        "__type__": "cc.Camera",
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_projection": 0,
-        "_priority": 1073741824,
-        "_fov": 45,
-        "_fovAxis": 0,
-        "_orthoHeight": ortho_height,
-        "_near": 1,
-        "_far": 2000,
-        "_color": _color(*clear_color),
-        "_depth": 1,
-        "_stencil": 0,
-        "_clearFlags": 7,
-        "_rect": _rect(0, 0, 1, 1),
-        "_aperture": 19,
-        "_shutter": 7,
-        "_iso": 0,
-        "_screenScale": 1,
-        "_visibility": 41943040,
-        "_targetTexture": None,
-        "_cameraType": -1,
-        "_trackingType": 0,
-        "_id": _nid("cam"),
-    }
-
-
-def _make_canvas(node_idx: int, camera_cmp_idx: int) -> dict:
-    return {
-        "__type__": "cc.Canvas",
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_cameraComponent": _ref(camera_cmp_idx),
-        "_alignCanvasWithScreen": True,
-        "_id": _nid("cvs"),
-    }
-
-
-def _make_widget(node_idx: int, align_flags: int = 45, target_idx: int | None = None) -> dict:
-    return {
-        "__type__": "cc.Widget",
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_alignFlags": align_flags,
-        "_target": _ref(target_idx) if target_idx is not None else None,
-        "_left": 0,
-        "_right": 0,
-        "_top": 0,
-        "_bottom": 0,
-        "_horizontalCenter": 0,
-        "_verticalCenter": 0,
-        "_isAbsLeft": True,
-        "_isAbsRight": True,
-        "_isAbsTop": True,
-        "_isAbsBottom": True,
-        "_isAbsHorizontalCenter": True,
-        "_isAbsVerticalCenter": True,
-        "_originalWidth": 0,
-        "_originalHeight": 0,
-        "_alignMode": 2,
-        "_lockFlags": 0,
-        "_id": _nid("wgt"),
-    }
-
-
-def _make_sprite(node_idx: int, sprite_frame_uuid: str | None, size_mode: int = 0, color=(255, 255, 255, 255)) -> dict:
-    """size_mode: 0=CUSTOM, 1=TRIMMED, 2=RAW"""
-    return {
-        "__type__": "cc.Sprite",
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_customMaterial": None,
-        "_srcBlendFactor": 2,
-        "_dstBlendFactor": 4,
-        "_color": _color(*color),
-        "_spriteFrame": {"__uuid__": sprite_frame_uuid} if sprite_frame_uuid else None,
-        "_type": 0,
-        "_fillType": 0,
-        "_sizeMode": size_mode,
-        "_fillCenter": _vec2(0, 0),
-        "_fillStart": 0,
-        "_fillRange": 0,
-        "_isTrimmedMode": True,
-        "_useGrayscale": False,
-        "_atlas": None,
-        "_id": _nid("spr"),
-    }
-
-
-def _make_label(node_idx: int, text: str, font_size: int = 40, color=(255, 255, 255, 255),
-                h_align: int = 1, v_align: int = 1,
-                overflow: int = 0, enable_wrap: bool = False,
-                line_height: int = 0, enable_outline: bool = True,
-                outline_color=(0, 0, 0, 255), outline_width: int = 3,
-                cache_mode: int = 0) -> dict:
-    return {
-        "__type__": "cc.Label",
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_customMaterial": None,
-        "_srcBlendFactor": 2,
-        "_dstBlendFactor": 4,
-        "_color": _color(*color),
-        "_useOriginalSize": False,
-        "_string": text,
-        "_horizontalAlign": h_align,
-        "_verticalAlign": v_align,
-        "_actualFontSize": font_size,
-        "_fontSize": font_size,
-        "_fontFamily": "Arial",
-        "_lineHeight": line_height if line_height > 0 else font_size,
-        "_overflow": overflow,
-        "_enableWrapText": enable_wrap,
-        "_font": None,
-        "_isSystemFontUsed": True,
-        "_spacingX": 0,
-        "_isItalic": False,
-        "_isBold": False,
-        "_isUnderline": False,
-        "_underlineHeight": 2,
-        "_cacheMode": cache_mode,
-        "_enableOutline": enable_outline,
-        "_outlineColor": _color(*outline_color),
-        "_outlineWidth": outline_width,
-        "_enableShadow": False,
-        "_shadowColor": _color(0, 0, 0, 255),
-        "_shadowOffset": _vec2(2, 2),
-        "_shadowBlur": 2,
-        "_id": _nid("lbl"),
-    }
-
-
-def _make_graphics(node_idx: int) -> dict:
-    return {
-        "__type__": "cc.Graphics",
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_customMaterial": None,
-        "_srcBlendFactor": 2,
-        "_dstBlendFactor": 4,
-        "_color": _color(255, 255, 255, 255),
-        "_lineWidth": 2,
-        "_strokeColor": _color(0, 0, 0, 255),
-        "_lineJoin": 2,
-        "_lineCap": 0,
-        "_fillColor": _color(255, 255, 255, 255),
-        "_miterLimit": 10,
-        "_id": _nid("gfx"),
-    }
-
-
-def _make_script_component(script_uuid_compressed: str, node_idx: int, props: dict | None = None) -> dict:
-    obj = {
-        "__type__": script_uuid_compressed,
-        "_name": "",
-        "_objFlags": 0,
-        "node": _ref(node_idx),
-        "_enabled": True,
-        "__prefab": None,
-        "_id": _nid("scr"),
-    }
-    if props:
-        # Convert any {"__id__": N} hints already passed
-        obj.update(props)
-    return obj
-
-
-# ----------- scene-globals helpers -----------
-
-def _make_ambient_info() -> dict:
-    return {
-        "__type__": "cc.AmbientInfo",
-        "_skyColor": _vec4(0.2, 0.5019607843137255, 0.8, 0.520833125),
-        "_skyIllum": 20000,
-        "_groundAlbedo": _vec4(0.2, 0.2, 0.2, 1),
-        "_skyColorLDR": _vec4(0.2, 0.5019607843137255, 0.8, 0.520833125),
-        "_skyColorHDR": _vec4(0.2, 0.5019607843137255, 0.8, 0.520833125),
-        "_groundAlbedoLDR": _vec4(0.2, 0.2, 0.2, 1),
-        "_groundAlbedoHDR": _vec4(0.2, 0.2, 0.2, 1),
-        "_skyIllumLDR": 0.78125,
-        "_skyIllumHDR": 20000,
-    }
-
-
-def _make_skybox_info() -> dict:
-    return {
-        "__type__": "cc.SkyboxInfo",
-        "_envmap": None,
-        "_enabled": False,
-        "_useHDR": True,
-        "_envmapLDR": None,
-        "_envmapHDR": None,
-        "_diffuseMapLDR": None,
-        "_diffuseMapHDR": None,
-        "_envLightingType": 0,
-    }
-
-
-def _make_shadows_info() -> dict:
-    return {
-        "__type__": "cc.ShadowsInfo",
-        "_enabled": False,
-        "_normal": _vec3(0, 1, 0),
-        "_distance": 0,
-        "_shadowColor": _color(0, 0, 0, 76),
-    }
-
-
-# ----------- read / write -----------
-
-def _load_scene(scene_path: str | Path) -> list:
-    with open(scene_path) as f:
-        return json.load(f)
-
-
-def _save_scene(scene_path: str | Path, scene: list) -> None:
-    with open(scene_path, "w") as f:
-        json.dump(scene, f, indent=2)
-
+__all__ = ["batch_ops"]  # extended below as we go; for now just batch
 
 # ----------- public API -----------
 
@@ -452,7 +164,7 @@ def create_empty_scene(scene_path: str | Path, scene_uuid: str | None = None,
     _save_scene(scene_path, objects)
 
     # also write meta sidecar
-    from .meta_util import write_meta
+    from ..meta_util import write_meta
     write_meta(scene_path, scene_meta(uuid=scene_uuid))
 
     return {
@@ -490,43 +202,6 @@ def add_node(scene_path: str | Path, parent_id: int, name: str,
     _save_scene(scene_path, s)
     return new_id
 
-
-# Components that require UITransform to render. If attaching one of these
-# and the node doesn't already have a UITransform, auto-add one.
-_UI_RENDER_TYPES = frozenset({
-    "cc.Sprite", "cc.Label", "cc.Graphics", "cc.RichText", "cc.Mask",
-    "cc.ParticleSystem2D", "sp.Skeleton", "dragonBones.ArmatureDisplay",
-})
-
-
-def _has_uitransform(s: list, node_id: int) -> bool:
-    for comp_ref in s[node_id].get("_components", []):
-        cid = comp_ref.get("__id__")
-        if cid is not None and cid < len(s) and s[cid].get("__type__") == "cc.UITransform":
-            return True
-    return False
-
-
-def _ensure_uitransform(s: list, node_id: int) -> None:
-    """Auto-add a default UITransform if the node doesn't have one."""
-    if not _has_uitransform(s, node_id):
-        uit = _make_uitransform(node_id, 100, 100)
-        s.append(uit)
-        uit_id = len(s) - 1
-        s[node_id].setdefault("_components", []).insert(0, _ref(uit_id))
-
-
-def _attach_component(s: list, node_id: int, comp_obj: dict) -> int:
-    if s[node_id].get("__type__") != "cc.Node":
-        raise ValueError(f"node_id {node_id} is not a cc.Node")
-    # Auto-add UITransform for UI render components
-    comp_type = comp_obj.get("__type__", "")
-    if comp_type in _UI_RENDER_TYPES:
-        _ensure_uitransform(s, node_id)
-    s.append(comp_obj)
-    new_id = len(s) - 1
-    s[node_id].setdefault("_components", []).append(_ref(new_id))
-    return new_id
 
 
 def add_uitransform(scene_path: str | Path, node_id: int, width: float, height: float,
@@ -711,7 +386,7 @@ def validate_scene(scene_path: str | Path) -> dict:
 
     # --- 3. UI nodes (with UITransform) should be under a Canvas ---
     canvas_node_ids = set()
-    for i, o in enumerate(s):
+    for o in s:
         if isinstance(o, dict) and o.get("__type__") == "cc.Canvas":
             node_ref = o.get("node")
             if node_ref and "__id__" in node_ref:
@@ -778,7 +453,7 @@ def create_prefab(prefab_path: str | Path, root_name: str = "Root", prefab_uuid:
     if prefab_uuid is None:
         prefab_uuid = new_uuid()
 
-    objects = []
+    objects: list[dict] = []
 
     def push(obj):
         idx = len(objects)
@@ -812,7 +487,7 @@ def create_prefab(prefab_path: str | Path, root_name: str = "Root", prefab_uuid:
 
     _save_scene(prefab_path, objects)
 
-    from .meta_util import write_meta
+    from ..meta_util import write_meta
     write_meta(prefab_path, prefab_meta(uuid=prefab_uuid, sync_node_name=root_name))
 
     return {
@@ -825,46 +500,6 @@ def create_prefab(prefab_path: str | Path, root_name: str = "Root", prefab_uuid:
 # ================================================================
 #  P0 extensions: generic component, physics, UI, audio, animation
 # ================================================================
-
-# ----------- auto-wrap composite values -----------
-
-def _auto_wrap_value(key: str, val: Any) -> Any:
-    """Heuristic coercion for scene-file property values.
-
-    Rules (applied in order):
-      * dict with `__type__`, `__id__`, or `__uuid__` → passthrough
-      * list len 3 → cc.Vec3(x,y,z)
-      * list len 4 + key contains "color" → cc.Color(r,g,b,a)
-      * list len 4 otherwise → cc.Vec4
-      * list len 2 + key contains "size" → cc.Size(w,h)
-      * list len 2 otherwise → cc.Vec2(x,y)
-      * int (not bool) → {__id__: N} (node/component ref)
-      * everything else → passthrough
-    """
-    if isinstance(val, dict):
-        return val  # caller already structured it
-    if isinstance(val, list):
-        if len(val) == 3:
-            return _vec3(*val)
-        if len(val) == 4:
-            if "color" in key.lower() or "Color" in key:
-                return _color(*[int(v) for v in val])
-            return _vec4(*val)
-        if len(val) == 2:
-            if "size" in key.lower() or "Size" in key:
-                return _size(*val)
-            return _vec2(*val)
-        return val
-    if isinstance(val, int) and not isinstance(val, bool):
-        return _ref(val)
-    return val
-
-
-def _wrap_props(props: dict | None) -> dict:
-    if not props:
-        return {}
-    return {k: _auto_wrap_value(k, v) for k, v in props.items()}
-
 
 # ----------- generic add_component -----------
 
@@ -1497,198 +1132,6 @@ def get_object(scene_path: str | Path, object_id: int) -> dict:
 
 
 # ================================================================
-#  Batch operations (single file read/write for multiple mutations)
-# ================================================================
-
-def batch_ops(scene_path: str | Path, operations: list[dict]) -> dict:
-    """Execute multiple scene operations in one file read/write cycle.
-
-    Supports $N back-references: if an op returns an int (node/component id),
-    later ops can reference it as "$0", "$1", etc.
-    """
-    s = _load_scene(scene_path)
-    results = []
-
-    def resolve(val):
-        """Replace "$N" strings with the result of op N."""
-        if isinstance(val, str) and val.startswith("$") and val[1:].isdigit():
-            idx = int(val[1:])
-            if idx < len(results):
-                return results[idx]
-        return val
-
-    def resolve_dict(d: dict) -> dict:
-        return {k: resolve(v) for k, v in d.items()}
-
-    for i, raw_op in enumerate(operations):
-        op = resolve_dict(raw_op)
-        action = op.get("op", "")
-        try:
-            if action == "add_node":
-                node = _make_node(
-                    op.get("name", f"Node_{i}"),
-                    op.get("parent_id", 2),
-                    lpos=(op.get("pos_x", 0), op.get("pos_y", 0), op.get("pos_z", 0)),
-                    layer=op.get("layer", LAYER_UI_2D),
-                    active=op.get("active", True),
-                )
-                s.append(node)
-                new_id = len(s) - 1
-                parent = s[op.get("parent_id", 2)]
-                children = parent.setdefault("_children", [])
-                si = op.get("sibling_index", -1)
-                if si < 0 or si >= len(children):
-                    children.append(_ref(new_id))
-                else:
-                    children.insert(si, _ref(new_id))
-                results.append(new_id)
-
-            elif action == "add_uitransform":
-                nid = op["node_id"]
-                cid = _attach_component(s, nid, _make_uitransform(
-                    nid, op.get("width", 100), op.get("height", 100),
-                    op.get("anchor_x", 0.5), op.get("anchor_y", 0.5)))
-                results.append(cid)
-
-            elif action == "add_label":
-                nid = op["node_id"]
-                color = (op.get("color_r", 255), op.get("color_g", 255),
-                         op.get("color_b", 255), op.get("color_a", 255))
-                cid = _attach_component(s, nid, _make_label(
-                    nid, op.get("text", ""), op.get("font_size", 40), color))
-                results.append(cid)
-
-            elif action == "add_sprite":
-                nid = op["node_id"]
-                cid = _attach_component(s, nid, _make_sprite(
-                    nid, op.get("sprite_frame_uuid"), op.get("size_mode", 0)))
-                results.append(cid)
-
-            elif action == "add_graphics":
-                nid = op["node_id"]
-                cid = _attach_component(s, nid, _make_graphics(nid))
-                results.append(cid)
-
-            elif action == "add_component":
-                nid = op["node_id"]
-                obj: dict[str, Any] = {
-                    "__type__": op["type_name"],
-                    "_name": "", "_objFlags": 0,
-                    "node": _ref(nid), "_enabled": True,
-                    "__prefab": None, "_id": _nid("cmp"),
-                }
-                obj.update(_wrap_props(op.get("props") or {}))
-                cid = _attach_component(s, nid, obj)
-                results.append(cid)
-
-            elif action == "add_rigidbody2d":
-                nid = op["node_id"]
-                obj: dict[str, Any] = {
-                    "__type__": "cc.RigidBody2D", "_name": "", "_objFlags": 0,
-                    "node": _ref(nid), "_enabled": True, "__prefab": None,
-                    "_id": _nid("rb2"),
-                    "enabledContactListener": True,
-                    "type": op.get("body_type", 2),
-                    "gravityScale": op.get("gravity_scale", 1.0),
-                    "linearDamping": op.get("linear_damping", 0.0),
-                    "angularDamping": op.get("angular_damping", 0.0),
-                    "fixedRotation": op.get("fixed_rotation", False),
-                    "bullet": op.get("bullet", False),
-                    "allowSleep": True,
-                    "awakeOnLoad": op.get("awake_on_load", True),
-                    "linearVelocity": _vec2(0, 0),
-                    "angularVelocity": 0.0,
-                }
-                cid = _attach_component(s, nid, obj)
-                results.append(cid)
-
-            elif action == "add_box_collider2d":
-                nid = op["node_id"]
-                obj = {
-                    "__type__": "cc.BoxCollider2D", "_name": "", "_objFlags": 0,
-                    "node": _ref(nid), "_enabled": True, "__prefab": None,
-                    "_id": _nid("bc2"),
-                    "tag": op.get("tag", 0),
-                    "_density": op.get("density", 1.0),
-                    "_sensor": op.get("is_sensor", False),
-                    "_friction": op.get("friction", 0.2),
-                    "_restitution": op.get("restitution", 0.0),
-                    "_size": _size(op.get("width", 100), op.get("height", 100)),
-                    "_offset": _vec2(op.get("offset_x", 0), op.get("offset_y", 0)),
-                }
-                cid = _attach_component(s, nid, obj)
-                results.append(cid)
-
-            elif action == "add_circle_collider2d":
-                nid = op["node_id"]
-                obj = {
-                    "__type__": "cc.CircleCollider2D", "_name": "", "_objFlags": 0,
-                    "node": _ref(nid), "_enabled": True, "__prefab": None,
-                    "_id": _nid("cc2"),
-                    "tag": op.get("tag", 0),
-                    "_density": op.get("density", 1.0),
-                    "_sensor": op.get("is_sensor", False),
-                    "_friction": op.get("friction", 0.2),
-                    "_restitution": op.get("restitution", 0.0),
-                    "_radius": op.get("radius", 50),
-                    "_offset": _vec2(op.get("offset_x", 0), op.get("offset_y", 0)),
-                }
-                cid = _attach_component(s, nid, obj)
-                results.append(cid)
-
-            elif action == "add_button":
-                nid = op["node_id"]
-                obj = {
-                    "__type__": "cc.Button", "_name": "", "_objFlags": 0,
-                    "node": _ref(nid), "_enabled": True, "__prefab": None,
-                    "_id": _nid("btn"),
-                    "transition": op.get("transition", 2),
-                    "zoomScale": op.get("zoom_scale", 1.1),
-                    "duration": 0.1, "_interactable": True, "clickEvents": [],
-                }
-                cid = _attach_component(s, nid, obj)
-                results.append(cid)
-
-            elif action == "attach_script":
-                nid = op["node_id"]
-                props = op.get("props") or {}  # no auto-wrap, pass as-is
-                cid = _attach_component(s, nid, _make_script_component(
-                    op["script_uuid_compressed"], nid, props))
-                results.append(cid)
-
-            elif action == "link_property":
-                cid = op["component_id"]
-                target = op.get("target_id")
-                s[cid][op["prop_name"]] = _ref(target) if target is not None else None
-                results.append(True)
-
-            elif action == "set_property":
-                s[op["object_id"]][op["prop_name"]] = op["value"]
-                results.append(True)
-
-            elif action == "set_position":
-                s[op["node_id"]]["_lpos"] = _vec3(op.get("x", 0), op.get("y", 0), op.get("z", 0))
-                results.append(True)
-
-            elif action == "set_active":
-                s[op["node_id"]]["_active"] = op.get("active", True)
-                results.append(True)
-
-            else:
-                results.append({"error": f"unknown op: {action}"})
-
-        except Exception as e:
-            results.append({"error": f"op[{i}] {action}: {e}"})
-
-    _save_scene(scene_path, s)
-    return {
-        "object_count": len(s),
-        "ops_executed": len(operations),
-        "results": results,
-    }
-
-
-# ================================================================
 #  Spine / DragonBones skeletal animation
 # ================================================================
 
@@ -1891,3 +1334,478 @@ def add_motion_streak(scene_path: str | Path, node_id: int,
         "_color": _color(*color),
         "_fastMode": fast_mode,
     })
+
+
+# ================================================================
+#  Scene-globals setters: ambient, skybox, shadows
+# ================================================================
+#
+# Every scene built via create_empty_scene has a SceneGlobals object that
+# holds three sub-objects: AmbientInfo, SkyboxInfo, ShadowsInfo. To configure
+# lighting after creation you mutate those sub-objects in place — but their
+# array indices aren't fixed in user-edited scenes, so we look them up by
+# component __type__ rather than hard-coding a position.
+
+def _find_global_info(s: list, type_name: str) -> int | None:
+    """Locate a singleton scene-globals component (cc.AmbientInfo etc.) by type."""
+    for i, obj in enumerate(s):
+        if isinstance(obj, dict) and obj.get("__type__") == type_name:
+            return i
+    return None
+
+
+def set_ambient(scene_path: str | Path,
+                sky_color: tuple | None = None,
+                sky_illum: float | None = None,
+                ground_albedo: tuple | None = None) -> dict:
+    """Set ambient lighting on the scene's cc.AmbientInfo.
+
+    Each arg is optional — pass None to leave that field unchanged.
+      sky_color, ground_albedo: (r, g, b, a) floats 0-1 (NOT 0-255).
+      sky_illum: lux value, default 20000 in a fresh scene.
+
+    Returns the updated AmbientInfo dict.
+    """
+    s = _load_scene(scene_path)
+    idx = _find_global_info(s, "cc.AmbientInfo")
+    if idx is None:
+        raise ValueError("scene has no cc.AmbientInfo (was it created via create_empty_scene?)")
+    info = s[idx]
+    if sky_color is not None:
+        info["_skyColor"] = _vec4(*sky_color)
+        info["_skyColorLDR"] = _vec4(*sky_color)
+        info["_skyColorHDR"] = _vec4(*sky_color)
+    if sky_illum is not None:
+        info["_skyIllum"] = sky_illum
+        info["_skyIllumHDR"] = sky_illum
+    if ground_albedo is not None:
+        info["_groundAlbedo"] = _vec4(*ground_albedo)
+        info["_groundAlbedoLDR"] = _vec4(*ground_albedo)
+        info["_groundAlbedoHDR"] = _vec4(*ground_albedo)
+    _save_scene(scene_path, s)
+    return info
+
+
+def set_skybox(scene_path: str | Path,
+               enabled: bool | None = None,
+               envmap_uuid: str | None = None,
+               use_hdr: bool | None = None,
+               env_lighting_type: int | None = None) -> dict:
+    """Set skybox on the scene's cc.SkyboxInfo.
+
+      env_lighting_type: 0=HEMISPHERE_DIFFUSE, 1=AUTOGEN_HEMISPHERE_DIFFUSE, 2=DIFFUSEMAP_WITH_REFLECTION.
+      envmap_uuid: cc.TextureCube uuid; pass empty string "" to clear.
+
+    Each arg is optional. Returns the updated SkyboxInfo dict.
+    """
+    s = _load_scene(scene_path)
+    idx = _find_global_info(s, "cc.SkyboxInfo")
+    if idx is None:
+        raise ValueError("scene has no cc.SkyboxInfo")
+    info = s[idx]
+    if enabled is not None:
+        info["_enabled"] = enabled
+    if envmap_uuid is not None:
+        ref = {"__uuid__": envmap_uuid, "__expectedType__": "cc.TextureCube"} if envmap_uuid else None
+        info["_envmap"] = ref
+        info["_envmapHDR"] = ref
+        info["_envmapLDR"] = ref
+    if use_hdr is not None:
+        info["_useHDR"] = use_hdr
+    if env_lighting_type is not None:
+        info["_envLightingType"] = env_lighting_type
+    _save_scene(scene_path, s)
+    return info
+
+
+def set_shadows(scene_path: str | Path,
+                enabled: bool | None = None,
+                normal: tuple | None = None,
+                distance: float | None = None,
+                color: tuple | None = None) -> dict:
+    """Set planar shadows on the scene's cc.ShadowsInfo.
+
+      normal: (x, y, z) shadow plane normal, default (0, 1, 0) for ground.
+      distance: signed offset along normal from origin.
+      color: (r, g, b, a) ints 0-255.
+
+    Each arg is optional. Returns the updated ShadowsInfo dict.
+    """
+    s = _load_scene(scene_path)
+    idx = _find_global_info(s, "cc.ShadowsInfo")
+    if idx is None:
+        raise ValueError("scene has no cc.ShadowsInfo")
+    info = s[idx]
+    if enabled is not None:
+        info["_enabled"] = enabled
+    if normal is not None:
+        info["_normal"] = _vec3(*normal)
+    if distance is not None:
+        info["_distance"] = distance
+    if color is not None:
+        info["_shadowColor"] = _color(*color)
+    _save_scene(scene_path, s)
+    return info
+
+
+# ================================================================
+#  2D physics joints (cc.*Joint2D)
+# ================================================================
+#
+# All cc.*Joint2D components share a base set of fields:
+#   - node:           ref to the node carrying the joint (and its RigidBody2D)
+#   - _connectedBody: ref to the OTHER body's RigidBody2D component (optional;
+#                     None means joint anchors to the world)
+#   - _collideConnected: whether the two bodies still collide with each other
+# Each joint then layers its own anchor / motor / limit / spring fields.
+# Both nodes must already have a cc.RigidBody2D attached.
+
+def _make_joint2d_base(node_idx: int, type_name: str, prefix: str,
+                       connected_body_id: int | None,
+                       collide_connected: bool) -> dict:
+    """Common joint object skeleton."""
+    return {
+        "__type__": type_name,
+        "_name": "",
+        "_objFlags": 0,
+        "node": _ref(node_idx),
+        "_enabled": True,
+        "__prefab": None,
+        "_connectedBody": _ref(connected_body_id) if connected_body_id is not None else None,
+        "_collideConnected": collide_connected,
+        "_id": _nid(prefix),
+    }
+
+
+def _attach_joint(scene_path, node_id: int, joint_obj: dict) -> int:
+    s = _load_scene(scene_path)
+    cid = _attach_component(s, node_id, joint_obj)
+    _save_scene(scene_path, s)
+    return cid
+
+
+def add_distance_joint2d(scene_path: str | Path, node_id: int,
+                         connected_body_id: int | None = None,
+                         anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
+                         distance: float = 1.0, auto_calc_distance: bool = True,
+                         frequency: float = 0.0, damping_ratio: float = 0.0,
+                         collide_connected: bool = False) -> int:
+    """Attach cc.DistanceJoint2D — keeps two bodies a fixed distance apart."""
+    obj = _make_joint2d_base(node_id, "cc.DistanceJoint2D", "dj2", connected_body_id, collide_connected)
+    obj.update({
+        "_anchor": _vec2(*anchor),
+        "_connectedAnchor": _vec2(*connected_anchor),
+        "_distance": distance,
+        "_autoCalcDistance": auto_calc_distance,
+        "_frequency": frequency,
+        "_dampingRatio": damping_ratio,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_hinge_joint2d(scene_path: str | Path, node_id: int,
+                      connected_body_id: int | None = None,
+                      anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
+                      enable_motor: bool = False, motor_speed: float = 0.0,
+                      max_motor_torque: float = 1000.0,
+                      enable_limit: bool = False,
+                      lower_angle: float = 0.0, upper_angle: float = 0.0,
+                      collide_connected: bool = False) -> int:
+    """Attach cc.HingeJoint2D — rotates around a shared anchor (door, wheel)."""
+    obj = _make_joint2d_base(node_id, "cc.HingeJoint2D", "hj2", connected_body_id, collide_connected)
+    obj.update({
+        "_anchor": _vec2(*anchor),
+        "_connectedAnchor": _vec2(*connected_anchor),
+        "_enableMotor": enable_motor,
+        "_motorSpeed": motor_speed,
+        "_maxMotorTorque": max_motor_torque,
+        "_enableLimit": enable_limit,
+        "_lowerAngle": lower_angle,
+        "_upperAngle": upper_angle,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_spring_joint2d(scene_path: str | Path, node_id: int,
+                       connected_body_id: int | None = None,
+                       anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
+                       distance: float = 1.0, auto_calc_distance: bool = True,
+                       frequency: float = 5.0, damping_ratio: float = 0.7,
+                       collide_connected: bool = False) -> int:
+    """Attach cc.SpringJoint2D — soft-springy distance constraint (suspension, ropes)."""
+    obj = _make_joint2d_base(node_id, "cc.SpringJoint2D", "sj2", connected_body_id, collide_connected)
+    obj.update({
+        "_anchor": _vec2(*anchor),
+        "_connectedAnchor": _vec2(*connected_anchor),
+        "_distance": distance,
+        "_autoCalcDistance": auto_calc_distance,
+        "_frequency": frequency,
+        "_dampingRatio": damping_ratio,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_mouse_joint2d(scene_path: str | Path, node_id: int,
+                      max_force: float = 1000.0,
+                      frequency: float = 5.0, damping_ratio: float = 0.7,
+                      target: tuple = (0, 0)) -> int:
+    """Attach cc.MouseJoint2D — drag-to-target constraint, used for picking up bodies."""
+    # MouseJoint doesn't use connectedBody/collideConnected; build skeleton manually.
+    obj = {
+        "__type__": "cc.MouseJoint2D",
+        "_name": "", "_objFlags": 0,
+        "node": _ref(node_id), "_enabled": True, "__prefab": None,
+        "_id": _nid("mj2"),
+        "_maxForce": max_force,
+        "_frequency": frequency,
+        "_dampingRatio": damping_ratio,
+        "_target": _vec2(*target),
+    }
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_slider_joint2d(scene_path: str | Path, node_id: int,
+                       connected_body_id: int | None = None,
+                       anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
+                       angle: float = 0.0,
+                       enable_motor: bool = False, motor_speed: float = 0.0,
+                       max_motor_force: float = 1000.0,
+                       enable_limit: bool = False,
+                       lower_limit: float = 0.0, upper_limit: float = 0.0,
+                       collide_connected: bool = False) -> int:
+    """Attach cc.SliderJoint2D — translates along an axis (elevator rails, pistons)."""
+    obj = _make_joint2d_base(node_id, "cc.SliderJoint2D", "sl2", connected_body_id, collide_connected)
+    obj.update({
+        "_anchor": _vec2(*anchor),
+        "_connectedAnchor": _vec2(*connected_anchor),
+        "_angle": angle,
+        "_enableMotor": enable_motor,
+        "_motorSpeed": motor_speed,
+        "_maxMotorForce": max_motor_force,
+        "_enableLimit": enable_limit,
+        "_lowerLimit": lower_limit,
+        "_upperLimit": upper_limit,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_wheel_joint2d(scene_path: str | Path, node_id: int,
+                      connected_body_id: int | None = None,
+                      anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
+                      angle: float = 90.0,
+                      enable_motor: bool = False, motor_speed: float = 0.0,
+                      max_motor_torque: float = 1000.0,
+                      frequency: float = 5.0, damping_ratio: float = 0.7,
+                      collide_connected: bool = False) -> int:
+    """Attach cc.WheelJoint2D — wheel + axle for vehicles (combines slide + spring + motor)."""
+    obj = _make_joint2d_base(node_id, "cc.WheelJoint2D", "wj2", connected_body_id, collide_connected)
+    obj.update({
+        "_anchor": _vec2(*anchor),
+        "_connectedAnchor": _vec2(*connected_anchor),
+        "_angle": angle,
+        "_enableMotor": enable_motor,
+        "_motorSpeed": motor_speed,
+        "_maxMotorTorque": max_motor_torque,
+        "_frequency": frequency,
+        "_dampingRatio": damping_ratio,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_weld_joint2d(scene_path: str | Path, node_id: int,
+                     connected_body_id: int | None = None,
+                     anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
+                     angle: float = 0.0,
+                     frequency: float = 5.0, damping_ratio: float = 0.7,
+                     collide_connected: bool = False) -> int:
+    """Attach cc.WeldJoint2D — rigidly fuses two bodies (breakable structures)."""
+    obj = _make_joint2d_base(node_id, "cc.WeldJoint2D", "wd2", connected_body_id, collide_connected)
+    obj.update({
+        "_anchor": _vec2(*anchor),
+        "_connectedAnchor": _vec2(*connected_anchor),
+        "_angle": angle,
+        "_frequency": frequency,
+        "_dampingRatio": damping_ratio,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_relative_joint2d(scene_path: str | Path, node_id: int,
+                         connected_body_id: int | None = None,
+                         max_force: float = 1000.0, max_torque: float = 1000.0,
+                         correction_factor: float = 0.3,
+                         auto_calc_offset: bool = True,
+                         linear_offset: tuple = (0, 0), angular_offset: float = 0.0,
+                         collide_connected: bool = False) -> int:
+    """Attach cc.RelativeJoint2D — keeps a relative position+angle, useful for 'attach' effects."""
+    obj = _make_joint2d_base(node_id, "cc.RelativeJoint2D", "rj2", connected_body_id, collide_connected)
+    obj.update({
+        "_maxForce": max_force,
+        "_maxTorque": max_torque,
+        "_correctionFactor": correction_factor,
+        "_autoCalcOffset": auto_calc_offset,
+        "_linearOffset": _vec2(*linear_offset),
+        "_angularOffset": angular_offset,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+def add_motor_joint2d(scene_path: str | Path, node_id: int,
+                      connected_body_id: int | None = None,
+                      max_force: float = 1000.0, max_torque: float = 1000.0,
+                      correction_factor: float = 0.3,
+                      linear_offset: tuple = (0, 0), angular_offset: float = 0.0,
+                      collide_connected: bool = False) -> int:
+    """Attach cc.MotorJoint2D — drives one body to follow another's position+angle."""
+    obj = _make_joint2d_base(node_id, "cc.MotorJoint2D", "mt2", connected_body_id, collide_connected)
+    obj.update({
+        "_maxForce": max_force,
+        "_maxTorque": max_torque,
+        "_correctionFactor": correction_factor,
+        "_linearOffset": _vec2(*linear_offset),
+        "_angularOffset": angular_offset,
+    })
+    return _attach_joint(scene_path, node_id, obj)
+
+
+# ================================================================
+#  cc.VideoPlayer
+# ================================================================
+
+def add_video_player(scene_path: str | Path, node_id: int,
+                     resource_type: int = 1,
+                     remote_url: str = "",
+                     clip_uuid: str | None = None,
+                     play_on_awake: bool = True,
+                     volume: float = 1.0,
+                     mute: bool = False,
+                     loop: bool = False,
+                     keep_aspect_ratio: bool = True,
+                     full_screen_on_awake: bool = False,
+                     stay_on_bottom: bool = False) -> int:
+    """Attach cc.VideoPlayer — plays mp4 from a local cc.VideoClip asset or a remote URL.
+
+    resource_type: 0=REMOTE (use remote_url), 1=LOCAL (use clip_uuid).
+
+    Common uses: cinematic intro, in-game cutscenes, rewarded video ads.
+    Note: WeChat mini-game uses a native overlay; stay_on_bottom + the
+    full screen flag affect platform-specific rendering behavior.
+    """
+    return add_component(scene_path, node_id, "cc.VideoPlayer", {
+        "_resourceType": resource_type,
+        "_remoteURL": remote_url,
+        "_clip": {"__uuid__": clip_uuid, "__expectedType__": "cc.VideoClip"} if clip_uuid else None,
+        "_playOnAwake": play_on_awake,
+        "_volume": volume,
+        "_mute": mute,
+        "_loop": loop,
+        "_keepAspectRatio": keep_aspect_ratio,
+        "_fullScreenOnAwake": full_screen_on_awake,
+        "_stayOnBottom": stay_on_bottom,
+    })
+
+
+# ================================================================
+#  Prefab instantiation: drop a .prefab into a scene as live nodes
+# ================================================================
+#
+# A .prefab file is a JSON array shaped like:
+#   [0] cc.Prefab         ← asset wrapper, holds optimization policy
+#   [1] cc.Node (root)    ← the real root node
+#   [2] cc.PrefabInfo     ← fileId metadata for the root
+#   [3..N] children/components, all referencing each other via __id__
+#
+# Instantiating means:
+#   * skip the [0] cc.Prefab wrapper (it's asset metadata, not a scene object)
+#   * deep-copy [1..N] and append to the target scene array
+#   * shift every __id__ reference inside the cloned region by
+#     (scene_len_before_append - 1)   ← -1 because [0] is dropped
+#   * re-mint _id strings (avoid collisions with existing scene _ids)
+#   * give each cc.PrefabInfo a fresh fileId so multiple instances don't alias
+#   * point the cloned root's _parent at the user-supplied parent_id
+#   * append the cloned root's new index to parent._children
+#
+# Limitations of this minimal implementation:
+#   * Treats prefabs as "unlinked" — edits to the source .prefab won't
+#     propagate. Cocos's true linked-instance model uses CompPrefabInfo +
+#     instance overrides; supporting it is a separate (much larger) feature.
+#   * Doesn't validate that nested prefabs are themselves resolvable.
+
+def _shift_id_refs(obj, delta: int) -> None:
+    """In-place: add `delta` to every {"__id__": N} integer reference."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "__id__" and isinstance(v, int):
+                obj[k] = v + delta
+            else:
+                _shift_id_refs(v, delta)
+    elif isinstance(obj, list):
+        for item in obj:
+            _shift_id_refs(item, delta)
+
+
+def instantiate_prefab(scene_path: str | Path, parent_id: int,
+                       prefab_path: str | Path,
+                       name: str | None = None,
+                       lpos: tuple | None = None,
+                       lscale: tuple | None = None) -> int:
+    """Drop a .prefab file into a scene as a child of parent_id.
+
+    Returns the new root node's array index in the scene.
+
+    Parameters:
+      scene_path: target .scene file
+      parent_id: array index of the cc.Node to parent the instance under
+      prefab_path: source .prefab file (read-only)
+      name: optional override for the root node's _name
+      lpos: optional (x, y, z) overriding root local position
+      lscale: optional (x, y, z) overriding root local scale
+
+    The cloned subtree gets fresh _id values and PrefabInfo.fileId values
+    so multiple instantiations of the same prefab don't collide.
+    """
+    s = _load_scene(scene_path)
+    if parent_id < 0 or parent_id >= len(s) or s[parent_id].get("__type__") != "cc.Node":
+        raise ValueError(f"parent_id {parent_id} is not a cc.Node in this scene")
+
+    with open(prefab_path) as f:
+        p_data = json.load(f)
+    if not p_data or p_data[0].get("__type__") != "cc.Prefab":
+        raise ValueError(f"{prefab_path} is not a valid prefab (missing cc.Prefab head)")
+
+    # [0] is the asset wrapper — drop it. The remaining [1..N] become real scene objects.
+    cloned = json.loads(json.dumps(p_data[1:]))  # deep copy
+
+    # Old prefab index i (1..N) maps to new scene index (i - 1 + len(s)).
+    # i.e. delta = len(s) - 1.
+    delta = len(s) - 1
+    for obj in cloned:
+        _shift_id_refs(obj, delta)
+
+    # Refresh _id (uniqueness within scene) and PrefabInfo.fileId (uniqueness across instances)
+    for obj in cloned:
+        if not isinstance(obj, dict):
+            continue
+        if "_id" in obj:
+            obj["_id"] = _nid("ins")
+        if obj.get("__type__") == "cc.PrefabInfo":
+            obj["fileId"] = new_uuid()
+
+    # Reparent root: prefab[1] is now cloned[0], lives at index len(s)
+    root_new_idx = len(s)
+    root = cloned[0]
+    if root.get("__type__") != "cc.Node":
+        raise ValueError(f"prefab root at [1] is {root.get('__type__')}, expected cc.Node")
+    root["_parent"] = _ref(parent_id)
+    if name is not None:
+        root["_name"] = name
+    if lpos is not None:
+        root["_lpos"] = _vec3(*lpos)
+    if lscale is not None:
+        root["_lscale"] = _vec3(*lscale)
+
+    s.extend(cloned)
+    s[parent_id].setdefault("_children", []).append(_ref(root_new_idx))
+
+    _save_scene(scene_path, s)
+    return root_new_idx

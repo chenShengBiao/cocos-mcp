@@ -16,11 +16,29 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
-
-from PIL import Image
+from typing import TYPE_CHECKING
 
 from .uuid_util import new_uuid
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from PIL.Image import Image as PILImage  # noqa: F401
+
+
+def _open_image(png_path: str | Path):
+    """Lazy import of Pillow.
+
+    Keeps non-image meta helpers (script/scene/prefab) usable in slim
+    environments where Pillow isn't installed. Raises a clear error if
+    Pillow is missing only when a PNG actually needs to be inspected.
+    """
+    try:
+        from PIL import Image
+    except ImportError as e:  # pragma: no cover - environment-specific
+        raise ImportError(
+            "Pillow is required for image meta operations. "
+            "Install with: pip install 'cocos-mcp' (which pulls Pillow)"
+        ) from e
+    return Image.open(png_path)
 
 TEXTURE_SUB_ID = "6c48a"
 SPRITE_FRAME_SUB_ID = "f9941"
@@ -112,7 +130,12 @@ def _texture_sub(main_uuid: str, name: str) -> dict:
     }
 
 
-def _sprite_frame_sub(main_uuid: str, name: str, w: int, h: int) -> dict:
+def _sprite_frame_sub(main_uuid: str, name: str, w: int, h: int,
+                      border: tuple[int, int, int, int] = (0, 0, 0, 0)) -> dict:
+    """Build the sprite-frame sub-meta. ``border`` = (top, bottom, left, right)
+    in pixels — non-zero values turn the asset into a 9-slice for cc.Sprite
+    type=SLICED rendering."""
+    bt, bb, bl, br = border
     return {
         "importer": "sprite-frame",
         "uuid": f"{main_uuid}@{SPRITE_FRAME_SUB_ID}",
@@ -135,10 +158,10 @@ def _sprite_frame_sub(main_uuid: str, name: str, w: int, h: int) -> dict:
             "height": h,
             "rawWidth": w,
             "rawHeight": h,
-            "borderTop": 0,
-            "borderBottom": 0,
-            "borderLeft": 0,
-            "borderRight": 0,
+            "borderTop": bt,
+            "borderBottom": bb,
+            "borderLeft": bl,
+            "borderRight": br,
             "isUuid": True,
             "imageUuidOrDatabaseUri": f"{main_uuid}@{TEXTURE_SUB_ID}",
             "atlasUuid": "",
@@ -160,10 +183,17 @@ def _sprite_frame_sub(main_uuid: str, name: str, w: int, h: int) -> dict:
     }
 
 
-def new_sprite_frame_meta(png_path: str | Path, name: str | None = None, uuid: str | None = None) -> dict:
-    """Create a complete sprite-frame meta for a PNG."""
+def new_sprite_frame_meta(png_path: str | Path, name: str | None = None,
+                          uuid: str | None = None,
+                          border: tuple[int, int, int, int] = (0, 0, 0, 0)) -> dict:
+    """Create a complete sprite-frame meta for a PNG.
+
+    ``border`` = (top, bottom, left, right) in pixels. Non-zero values make
+    the sprite-frame ready for 9-slice rendering with cc.Sprite type=SLICED
+    (rounded UI buttons, panels, etc.).
+    """
     png_path = Path(png_path)
-    img = Image.open(png_path)
+    img = _open_image(png_path)
     w, h = img.size
     main_uuid = uuid or new_uuid()
     display_name = name or png_path.stem
@@ -175,7 +205,7 @@ def new_sprite_frame_meta(png_path: str | Path, name: str | None = None, uuid: s
         "files": [".json", ".png"],
         "subMetas": {
             TEXTURE_SUB_ID: _texture_sub(main_uuid, display_name),
-            SPRITE_FRAME_SUB_ID: _sprite_frame_sub(main_uuid, display_name, w, h),
+            SPRITE_FRAME_SUB_ID: _sprite_frame_sub(main_uuid, display_name, w, h, border),
         },
         "userData": {
             "type": "sprite-frame",
@@ -184,6 +214,35 @@ def new_sprite_frame_meta(png_path: str | Path, name: str | None = None, uuid: s
             "fixAlphaTransparencyArtifacts": False,
         },
     }
+
+
+def set_sprite_frame_border(meta_path: str | Path, top: int = 0, bottom: int = 0,
+                            left: int = 0, right: int = 0) -> dict:
+    """Patch the 9-slice border on an existing sprite-frame meta in place.
+
+    Use this on any image meta — including ones produced by the editor's
+    --build pipeline — to enable 9-slice without re-importing the PNG.
+    Idempotent. Returns the updated meta dict.
+    """
+    meta_path = Path(meta_path)
+    with open(meta_path) as f:
+        meta = json.load(f)
+
+    sub = meta.get("subMetas", {}).get(SPRITE_FRAME_SUB_ID)
+    if not sub:
+        raise ValueError(
+            f"meta has no sprite-frame sub-resource: {meta_path}. "
+            f"Run upgrade_texture_to_sprite_frame first."
+        )
+    user = sub.setdefault("userData", {})
+    user["borderTop"] = int(top)
+    user["borderBottom"] = int(bottom)
+    user["borderLeft"] = int(left)
+    user["borderRight"] = int(right)
+
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    return meta
 
 
 def upgrade_texture_to_sprite_frame(meta_path: str | Path) -> dict:
@@ -209,7 +268,7 @@ def upgrade_texture_to_sprite_frame(meta_path: str | Path) -> dict:
     png_path = Path(str(meta_path).removesuffix(".meta"))
     if not png_path.exists():
         raise FileNotFoundError(f"PNG not found alongside meta: {png_path}")
-    w, h = Image.open(png_path).size
+    w, h = _open_image(png_path).size
 
     meta["subMetas"][SPRITE_FRAME_SUB_ID] = _sprite_frame_sub(main_uuid, name, w, h)
     meta["userData"]["type"] = "sprite-frame"
