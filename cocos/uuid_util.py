@@ -55,7 +55,7 @@ def decompress_uuid(short: str) -> str:
             hi = BASE64_VALUES[short[i]]
             lo = BASE64_VALUES[short[i + 1]]
         except KeyError as e:
-            raise ValueError(f"invalid base64 char in {short!r}: {e}")
+            raise ValueError(f"invalid base64 char in {short!r}: {e}") from e
         n = (hi << 6) | lo
         hex_out += f"{n:03x}"
     return f"{hex_out[:8]}-{hex_out[8:12]}-{hex_out[12:16]}-{hex_out[16:20]}-{hex_out[20:]}"

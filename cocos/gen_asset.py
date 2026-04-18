@@ -5,11 +5,32 @@ import hashlib
 import json
 import os
 import random
+import shutil
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+# Cache hits skip the (slow + paid) API call. Key = SHA-256 of the inputs that
+# fully determine the image: provider, model, final-prompt, size, seed.
+# Smithy's seed is ignored (Zhipu API doesn't honor it) so identical Zhipu
+# prompts hash to the same key. Disable per-run with --no-cache.
+_CACHE_DIR = Path(tempfile.gettempdir()) / "cocos-mcp-gen" / "cache"
+
+
+def _cache_key(provider: str, model: str, prompt: str, size: tuple[int, int],
+               seed: int | None) -> str:
+    parts = [provider, model, prompt, f"{size[0]}x{size[1]}"]
+    if provider != "zhipu" and seed is not None:
+        parts.append(str(seed))
+    blob = "|".join(parts).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def _cache_path(key: str) -> Path:
+    return _CACHE_DIR / f"{key}.png"
 
 PROVIDERS = ("pollinations", "zhipu")
 
@@ -66,6 +87,7 @@ def _strip_zhipu_watermark(img):
       像素才会被擦除，永远不会出现孤立小方块。
     """
     import sys as _sys
+
     from PIL import Image, ImageFilter
     rgb = img.convert("RGB")
     w, h = rgb.size
@@ -166,7 +188,7 @@ def _strip_zhipu_watermark(img):
     # 构造 mask 并膨胀
     mask = Image.new("L", (w, h), 0)
     mask_px = mask.load()
-    for x, y in zip(found_xs, found_ys):
+    for x, y in zip(found_xs, found_ys, strict=True):
         mask_px[x, y] = 255
     mask = mask.filter(ImageFilter.MaxFilter(31))  # 15 px 半径，吃软边
 
@@ -185,8 +207,9 @@ def _save_as_png(
     全都得重编码成真 PNG 才能让 make_transparent.py 工作。
     """
     try:
-        from PIL import Image
         from io import BytesIO
+
+        from PIL import Image
         img = Image.open(BytesIO(data))
         img = img.convert("RGBA")
         if strip_zhipu_watermark:
@@ -217,8 +240,25 @@ def _http_post_json(url: str, headers: dict, body: dict, timeout: int = 180) -> 
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _strip_env_quotes(value: str) -> str:
+    """Strip a single matching pair of surrounding single or double quotes.
+
+    Handles the very common ``KEY="value"`` and ``KEY='value'`` forms that vim
+    and many env-file editors produce. Without this, the literal quote chars
+    end up inside ``Authorization: Bearer "sk-..."`` headers and trigger a
+    silent 401. Inner whitespace is preserved.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        return value[1:-1]
+    return value
+
+
 def _load_env_file(path: Path) -> dict:
-    """读 KEY=VALUE 行格式的 .env，不解析引号、不展开变量，足够本脚本用。"""
+    """Parse .env in KEY=VALUE form. Comments and blank lines ignored.
+
+    Strips a single pair of surrounding single/double quotes from the value
+    (see _strip_env_quotes for why). Does NOT do variable expansion.
+    """
     env: dict = {}
     if not path.exists():
         return env
@@ -227,7 +267,7 @@ def _load_env_file(path: Path) -> dict:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        env[k.strip()] = v.strip()
+        env[k.strip()] = _strip_env_quotes(v.strip())
     return env
 
 
@@ -352,6 +392,11 @@ def main() -> int:
              "actually want the model to try drawing text (rarely works well; "
              "for accurate Chinese, use overlay_text.py instead).",
     )
+    parser.add_argument(
+        "--no-cache", action="store_true",
+        help="Bypass the on-disk cache keyed by (provider, model, prompt, "
+             "size, seed). Use when you want a fresh roll on the same prompt.",
+    )
     args = parser.parse_args()
 
     final_prompt = STYLES[args.style].format(prompt=args.prompt)
@@ -407,6 +452,19 @@ def main() -> int:
         filename = f"{timestamp}-{args.style}-{slug}{suffix}{seed_tag}.png"
         out_path = out_dir / filename
 
+        # Cache lookup: skip the API call if we've generated this exact
+        # (provider, model, prompt, size, seed) tuple before. count > 1 still
+        # cache-checks each variation independently because seed differs each loop.
+        cache_key = _cache_key(args.provider, args.model, final_prompt,
+                               actual_size, seed)
+        cached = _cache_path(cache_key)
+        if not args.no_cache and cached.exists():
+            shutil.copy2(cached, out_path)
+            line = f"OK  {out_path}  ({out_path.stat().st_size // 1024} KB)  [cache hit {cache_key}]"
+            print(line)
+            results.append(str(out_path))
+            continue
+
         print(f"[{i + 1}/{args.count}] seed={seed} ...", file=sys.stderr, flush=True)
         try:
             if args.provider == "zhipu":
@@ -418,6 +476,13 @@ def main() -> int:
                 size = gen_pollinations(
                     final_prompt, args.width, args.height, seed, args.model, out_path,
                 )
+            # Populate cache (best-effort; never block the success path on it)
+            if not args.no_cache:
+                try:
+                    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(out_path, cached)
+                except OSError as cache_err:
+                    print(f"WARN: cache write failed: {cache_err}", file=sys.stderr)
             line = f"OK  {out_path}  ({size // 1024} KB)"
             print(line)
             results.append(str(out_path))

@@ -1,17 +1,34 @@
 """Cocos Creator CLI build wrapper + local preview server."""
 from __future__ import annotations
 
-import os
+import contextlib
+import json
 import shutil
-import signal
+import socket
 import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
 
-from .project import find_creator, get_project_info
+from .project import find_creator
 
 # track running preview servers: {port: (subprocess.Popen, build_dir)}
 _preview_servers: dict[int, tuple] = {}
+
+# Cross-platform tmp dir for build/preview logs (/tmp on POSIX, %TEMP% on Windows).
+_LOG_DIR = Path(tempfile.gettempdir())
+
+
+def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """Cross-platform 'is something listening on this port?' check."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        try:
+            s.bind((host, port))
+        except OSError:
+            return True
+    return False
 
 
 def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: bool = True,
@@ -40,7 +57,7 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
         for sub in ("build", "temp"):
             shutil.rmtree(p / sub, ignore_errors=True)
 
-    log_path = Path("/tmp") / f"cocos-build-{p.name}.log"
+    log_path = _LOG_DIR / f"cocos-build-{p.name}.log"
     cmd = [
         cc_exe,
         "--project", str(p),
@@ -74,10 +91,10 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
         and build_dir.exists()
         and any(build_dir.iterdir())
     )
-    artifacts = []
+    artifacts: list[str] = []
     if build_dir.exists():
-        for f in sorted(build_dir.glob("*"))[:20]:
-            artifacts.append(str(f.relative_to(build_dir)))
+        for entry in sorted(build_dir.glob("*"))[:20]:
+            artifacts.append(str(entry.relative_to(build_dir)))
 
     return {
         "exit_code": exit_code,
@@ -93,9 +110,14 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
 def start_preview(project_path: str | Path, platform: str = "web-mobile", port: int = 8080) -> dict:
     """Serve build/<platform>/ over HTTP via a detached subprocess.
 
-    Uses an out-of-process `python3 -m http.server` so the preview survives
-    even if the calling MCP tool / Python interpreter exits. Idempotent —
-    stops any existing server on the same port first.
+    Spawns ``python -m http.server`` (using the current interpreter, so this
+    works on Windows / macOS / Linux without depending on a `python3` symlink
+    or `bash`/`lsof`). Idempotent — first stops any preview we ourselves
+    started on the same port.
+
+    If something else is already bound to the port, returns an error result
+    instead of trying to forcibly kill it (we'd have no portable way to do
+    that, and silently nuking unrelated processes is the wrong default).
     """
     stop_preview(port)
     p = Path(project_path).expanduser().resolve()
@@ -103,24 +125,29 @@ def start_preview(project_path: str | Path, platform: str = "web-mobile", port: 
     if not build_dir.exists():
         raise FileNotFoundError(f"build dir not found: {build_dir}. Run cocos_build first.")
 
-    # Also kill anything currently bound to the port (e.g. from a prior run
-    # in another process that we don't have a Popen handle for)
-    try:
-        subprocess.run(
-            ["bash", "-c", f"lsof -ti :{port} | xargs -r kill -9"],
-            capture_output=True, timeout=3,
-        )
-    except Exception:
-        pass
+    if _port_in_use(port):
+        return {
+            "port": port,
+            "url": None,
+            "serving": str(build_dir),
+            "error": (f"port {port} is already in use by another process; "
+                      f"call cocos_stop_preview({port}) first or pick a different port"),
+        }
 
-    log_path = Path("/tmp") / f"cocos-preview-{port}.log"
-    proc = subprocess.Popen(
-        ["python3", "-m", "http.server", str(port)],
-        cwd=str(build_dir),
-        stdout=open(log_path, "w"),
-        stderr=subprocess.STDOUT,
-        preexec_fn=os.setpgrp,  # detach from parent's process group
-    )
+    log_path = _LOG_DIR / f"cocos-preview-{port}.log"
+    # `subprocess.Popen` dup()s the file descriptor, so we can close our handle
+    # immediately after spawn — keeping the dangling Python file object would
+    # leak the FD until GC, which matters in a long-lived MCP server.
+    log_fh = open(log_path, "w")
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "http.server", str(port), "-d", str(build_dir)],
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+        )
+    finally:
+        log_fh.close()
+
     # Give the server a moment to bind
     time.sleep(0.4)
     if proc.poll() is not None:
@@ -143,28 +170,29 @@ def start_preview(project_path: str | Path, platform: str = "web-mobile", port: 
 
 
 def stop_preview(port: int = 8080) -> dict:
-    # First handle servers we ourselves started
+    """Stop a preview started by start_preview.
+
+    Only stops servers tracked in ``_preview_servers``. We deliberately do
+    NOT try to kill arbitrary processes holding the port — that would
+    require ``lsof`` (POSIX-only) plus signal-sending privileges that vary
+    by platform, and silently SIGKILL-ing a process the caller didn't start
+    has bitten us before.
+    """
     if port in _preview_servers:
         proc, build_dir = _preview_servers.pop(port)
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        # terminate() works cross-platform (SIGTERM on POSIX, TerminateProcess on Windows)
+        with contextlib.suppress(ProcessLookupError, OSError):
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3)
         return {"stopped": True, "port": port, "was_serving": build_dir, "pid": proc.pid}
 
-    # Otherwise try to kill anyone holding the port
-    try:
-        result = subprocess.run(
-            ["bash", "-c", f"lsof -ti :{port}"],
-            capture_output=True, text=True, timeout=3,
-        )
-        pids = result.stdout.strip().split("\n") if result.stdout.strip() else []
-        if pids:
-            subprocess.run(["bash", "-c", f"kill -9 {' '.join(pids)}"], timeout=3)
-            return {"stopped": True, "port": port, "killed_pids": pids}
-    except Exception:
-        pass
-    return {"stopped": False, "port": port}
+    return {"stopped": False, "port": port,
+            "note": "no tracked preview on this port; if something else is bound, "
+                    "kill it manually"}
 
 
 def preview_status() -> dict:
@@ -180,8 +208,6 @@ def preview_status() -> dict:
 # =====================================================================
 # Multi-scene / platform configuration
 # =====================================================================
-
-import json
 
 
 def _read_project_settings(project_path: str | Path) -> tuple[Path, dict]:
@@ -236,27 +262,205 @@ def add_scene_to_build(project_path: str | Path, scene_uuid: str) -> dict:
     }
 
 
+def _read_builder_json(project_path: str | Path) -> tuple[Path, dict]:
+    """Read settings/v2/packages/builder.json, creating an empty dict if missing."""
+    p = Path(project_path).expanduser().resolve()
+    builder_path = p / "settings" / "v2" / "packages" / "builder.json"
+    builder_path.parent.mkdir(parents=True, exist_ok=True)
+    if builder_path.exists():
+        with open(builder_path) as f:
+            return builder_path, json.load(f)
+    return builder_path, {}
+
+
+def _write_builder_json(builder_path: Path, data: dict) -> None:
+    with open(builder_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
 def set_wechat_appid(project_path: str | Path, appid: str) -> dict:
     """Write appid to builder.json for the wechatgame platform.
 
     Creates or patches ``settings/v2/packages/builder.json`` with
     ``wechatgame.appid``.
     """
-    p = Path(project_path).expanduser().resolve()
-    builder_path = p / "settings" / "v2" / "packages" / "builder.json"
-    builder_path.parent.mkdir(parents=True, exist_ok=True)
-    if builder_path.exists():
-        with open(builder_path) as f:
-            data = json.load(f)
-    else:
-        data = {}
+    builder_path, data = _read_builder_json(project_path)
     wechat = data.setdefault("wechatgame", {})
     wechat["appid"] = appid
-    with open(builder_path, "w") as f:
-        json.dump(data, f, indent=2)
+    _write_builder_json(builder_path, data)
     return {
         "builder_path": str(builder_path),
         "appid": appid,
+    }
+
+
+def set_wechat_subpackages(project_path: str | Path,
+                           subpackages: list[dict]) -> dict:
+    """Configure WeChat mini-game subpackages in builder.json.
+
+    Each entry: {"name": "<short-id>", "root": "assets/<dir>"}.
+    The 4 MB main-package limit is the most common reason WeChat builds get
+    rejected; subpackages let levels/audio/textures load lazily on demand.
+
+    Replaces the entire subpackages list (atomic). Returns the saved entries.
+    """
+    for sp in subpackages:
+        if not isinstance(sp, dict) or "name" not in sp or "root" not in sp:
+            raise ValueError(f"each subpackage must be {{'name': str, 'root': str}}, got {sp!r}")
+    builder_path, data = _read_builder_json(project_path)
+    wechat = data.setdefault("wechatgame", {})
+    wechat["subpackages"] = list(subpackages)
+    _write_builder_json(builder_path, data)
+    return {
+        "builder_path": str(builder_path),
+        "subpackages": wechat["subpackages"],
+    }
+
+
+def set_native_build_config(project_path: str | Path,
+                            platform: str,
+                            package_name: str | None = None,
+                            orientation: str | None = None,
+                            icon_path: str | None = None,
+                            splash_path: str | None = None,
+                            ios_team_id: str | None = None,
+                            android_min_api: int | None = None,
+                            android_target_api: int | None = None,
+                            android_use_debug_keystore: bool | None = None,
+                            android_keystore_path: str | None = None,
+                            android_keystore_password: str | None = None,
+                            android_keystore_alias: str | None = None,
+                            android_keystore_alias_password: str | None = None,
+                            android_app_bundle: bool | None = None) -> dict:
+    """Configure iOS / Android native build settings in builder.json.
+
+    `platform` must be 'ios' or 'android'. All other fields are optional —
+    pass None to leave existing values unchanged.
+
+    `orientation`: 'portrait' / 'landscape' / 'auto'. Builds Cocos's bitmask
+    {portrait, upsideDown, landscapeLeft, landscapeRight}.
+
+    The iOS-specific args are ignored on android (and vice-versa).
+    """
+    if platform not in ("ios", "android"):
+        raise ValueError(f"platform must be 'ios' or 'android', got {platform!r}")
+
+    builder_path, data = _read_builder_json(project_path)
+    cfg = data.setdefault(platform, {})
+
+    if package_name is not None:
+        cfg["packageName"] = package_name
+
+    if orientation is not None:
+        ori = {"portrait": False, "upsideDown": False,
+               "landscapeLeft": False, "landscapeRight": False}
+        if orientation == "portrait":
+            ori["portrait"] = True
+        elif orientation == "landscape":
+            ori["landscapeLeft"] = True
+            ori["landscapeRight"] = True
+        elif orientation == "auto":
+            for k in ori:
+                ori[k] = True
+        else:
+            raise ValueError(f"orientation must be portrait/landscape/auto, got {orientation!r}")
+        cfg["orientation"] = ori
+
+    if icon_path is not None:
+        cfg["icon"] = icon_path
+    if splash_path is not None:
+        cfg["splash"] = splash_path
+
+    if platform == "ios":
+        if ios_team_id is not None:
+            cfg["iosTeamID"] = ios_team_id
+    else:  # android
+        if android_min_api is not None:
+            cfg["minApiLevel"] = android_min_api
+        if android_target_api is not None:
+            cfg["targetApiLevel"] = android_target_api
+        if android_use_debug_keystore is not None:
+            cfg["useDebugKeystore"] = android_use_debug_keystore
+        if android_keystore_path is not None:
+            cfg["keystorePath"] = android_keystore_path
+        if android_keystore_password is not None:
+            cfg["keystorePassword"] = android_keystore_password
+        if android_keystore_alias is not None:
+            cfg["keystoreAlias"] = android_keystore_alias
+        if android_keystore_alias_password is not None:
+            cfg["keystoreAliasPassword"] = android_keystore_alias_password
+        if android_app_bundle is not None:
+            cfg["appBundle"] = android_app_bundle
+
+    _write_builder_json(builder_path, data)
+    return {
+        "builder_path": str(builder_path),
+        "platform": platform,
+        "config": cfg,
+    }
+
+
+def set_bundle_config(project_path: str | Path,
+                      folder_rel_path: str,
+                      bundle_name: str | None = None,
+                      is_bundle: bool = True,
+                      priority: int = 1,
+                      compression_type: dict | None = None,
+                      is_remote: dict | None = None) -> dict:
+    """Mark a folder as an Asset Bundle by patching its directory .meta.
+
+    `folder_rel_path` is relative to project root, e.g. 'assets/levels/world1'.
+    `bundle_name` defaults to the folder's basename when None.
+    `compression_type`: {platform: mode}, e.g.
+        {"web-mobile": "merge_dep", "wechatgame": "subpackage", "android": "merge_dep"}.
+    `is_remote`: {platform: bool}, mark the bundle for remote loading.
+
+    Cocos Creator's CLI build packs each marked folder into its own bundle
+    that the runtime loads via `AssetManager.loadBundle('<bundle_name>')`.
+    Critical for multi-MB games that need lazy / level-by-level loading.
+    """
+    p = Path(project_path).expanduser().resolve()
+    folder = p / folder_rel_path
+    if not folder.is_dir():
+        raise FileNotFoundError(f"not a directory: {folder}")
+
+    meta_path = folder.with_suffix(folder.suffix + ".meta") if folder.suffix \
+        else Path(str(folder) + ".meta")
+    # Cocos uses <folder>.meta as a sibling, not <folder>/.meta
+    if meta_path.exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+    else:
+        # Generate a minimal directory meta if Creator hasn't seen the folder yet
+        from .uuid_util import new_uuid
+        meta = {
+            "ver": "1.2.0",
+            "importer": "directory",
+            "imported": True,
+            "uuid": new_uuid(),
+            "files": [],
+            "subMetas": {},
+            "userData": {},
+        }
+
+    user = meta.setdefault("userData", {})
+    user["isBundle"] = is_bundle
+    user["bundleName"] = bundle_name or folder.name
+    user["priority"] = priority
+    if compression_type is not None:
+        user["compressionType"] = dict(compression_type)
+    if is_remote is not None:
+        user["isRemoteBundle"] = dict(is_remote)
+
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+    return {
+        "meta_path": str(meta_path),
+        "folder": str(folder),
+        "bundle_name": user["bundleName"],
+        "is_bundle": is_bundle,
+        "userData": user,
     }
 
 
@@ -270,6 +474,10 @@ def clean_project(project_path: str | Path, level: str = "default") -> dict:
       - ``all``     -- remove build/ + temp/ + library/
       - ``default`` -- remove build/ + temp/ (safe default)
 
+    Raises ``ValueError`` on unknown level — previously this silently fell
+    back to "default", which meant typos like "lib" (intending "library")
+    would skip the actual library/ dir without warning.
+
     Returns a dict listing which directories were removed.
     """
     p = Path(project_path).expanduser().resolve()
@@ -280,7 +488,12 @@ def clean_project(project_path: str | Path, level: str = "default") -> dict:
         "all": ["build", "temp", "library"],
         "default": ["build", "temp"],
     }
-    dirs = targets.get(level, targets["default"])
+    if level not in targets:
+        raise ValueError(
+            f"clean_project: unknown level {level!r}. "
+            f"Valid: {sorted(targets.keys())}"
+        )
+    dirs = targets[level]
     removed: list[str] = []
     for d in dirs:
         target = p / d
@@ -393,7 +606,7 @@ def set_engine_module(project_path: str | Path, module_name: str, enabled: bool)
 
 def get_engine_modules(project_path: str | Path) -> dict:
     """List all engine modules and their enabled/disabled status."""
-    engine_path, data = _read_engine_settings(project_path)
+    _, data = _read_engine_settings(project_path)
     cache = (data.get("modules", {}).get("configs", {})
              .get("defaultConfig", {}).get("cache", {}))
     include = (data.get("modules", {}).get("configs", {})

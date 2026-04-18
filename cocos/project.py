@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
-from .meta_util import script_ts_meta, write_meta, new_sprite_frame_meta
+from .meta_util import new_sprite_frame_meta, script_ts_meta, write_meta
 from .uuid_util import new_uuid
 
 # Where Cocos Dashboard installs Creator on each platform
@@ -64,7 +66,17 @@ def init_project(dst_path: str | Path, creator_version: str | None = None,
                  template: str = "empty-2d", project_name: str | None = None) -> dict:
     """Copy a Creator template into `dst_path` and patch package.json.
 
-    Returns paths to the new project + the Creator exe used.
+    Returns:
+      {
+        "project_path", "project_uuid", "creator_version",
+        "creator_exe", "template",
+        "skipped_files": list[str],   # template files NOT copied because
+                                       # the destination already had something
+                                       # with the same name (relative to dst).
+                                       # Caller should sanity-check this — a
+                                       # non-empty list means the project may
+                                       # be inconsistent.
+      }
     """
     creator = find_creator(creator_version)
     template_dir = Path(creator["template_dir"]) / template
@@ -75,11 +87,15 @@ def init_project(dst_path: str | Path, creator_version: str | None = None,
     dst = Path(dst_path).expanduser().resolve()
     dst.mkdir(parents=True, exist_ok=True)
 
-    # Copy template contents (including dotfiles)
+    # Copy template contents (including dotfiles). Don't overwrite existing
+    # files — but do report what got skipped so the caller knows the project
+    # may be incomplete.
+    skipped: list[str] = []
     for item in template_dir.iterdir():
         target = dst / item.name
         if target.exists():
-            continue  # don't overwrite
+            skipped.append(item.name)
+            continue
         if item.is_dir():
             shutil.copytree(item, target)
         else:
@@ -114,13 +130,16 @@ def init_project(dst_path: str | Path, creator_version: str | None = None,
         "creator_version": creator["version"],
         "creator_exe": creator["exe"],
         "template": template,
+        "skipped_files": skipped,
     }
 
 
 def get_project_info(project_path: str | Path) -> dict:
     """Read package.json and a few other diagnostic facts."""
     p = Path(project_path).expanduser().resolve()
-    info = {"project_path": str(p)}
+    # Heterogeneous values (str / bool / list / None) — typed as Any so mypy
+    # doesn't infer dict[str, str] from the first key and reject the rest.
+    info: dict[str, Any] = {"project_path": str(p)}
     pkg_path = p / "package.json"
     if pkg_path.exists():
         with open(pkg_path) as f:
@@ -201,13 +220,16 @@ def add_image(project_path: str | Path, src_png: str | Path, rel_path: str | Non
 def list_assets(project_path: str | Path) -> dict:
     """List all assets and their UUIDs."""
     p = Path(project_path).expanduser().resolve()
-    assets = {"scripts": [], "scenes": [], "images": [], "prefabs": []}
+    assets: dict[str, list[dict]] = {"scripts": [], "scenes": [], "images": [], "prefabs": []}
 
     def _read_uuid(meta_path: Path):
+        # Narrow exception list: only swallow file/JSON corruption, not
+        # programming bugs (KeyError on a typo, TypeError, etc.) which
+        # should still surface during development.
         try:
             with open(meta_path) as f:
                 return json.load(f).get("uuid")
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             return None
 
     for ts in p.glob("assets/**/*.ts"):
@@ -413,7 +435,7 @@ def _build_anim_json(name: str, duration: float, sample: int, tracks: list[dict]
 
     The .anim file is a JSON array (same format as .scene/.prefab).
     """
-    objects = []
+    objects: list[dict] = []
 
     def push(obj):
         idx = len(objects)
@@ -444,9 +466,7 @@ def _build_anim_json(name: str, duration: float, sample: int, tracks: list[dict]
         path = track.get("path", "")
         keyframes = track.get("keyframes", [])
 
-        if prop == "position":
-            t_idx = _build_vec3_track(objects, push, path, keyframes, "cc.animation.VectorTrack", 3)
-        elif prop == "scale":
+        if prop == "position" or prop == "scale":
             t_idx = _build_vec3_track(objects, push, path, keyframes, "cc.animation.VectorTrack", 3)
         elif prop == "rotation":
             # Euler Z only for 2D
@@ -574,7 +594,8 @@ def _build_color_track(objects, push, path, keyframes):
 # ----------- Spine assets -----------
 
 def add_spine_data(project_path: str | Path, spine_json_path: str | Path,
-                   atlas_path: str | Path, texture_paths: list[str | Path] | None = None,
+                   atlas_path: str | Path,
+                   texture_paths: Sequence[str | Path] | None = None,
                    rel_dir: str | None = None, uuid: str | None = None) -> dict:
     """Import a Spine skeleton into the project.
 
@@ -664,7 +685,8 @@ def add_spine_data(project_path: str | Path, spine_json_path: str | Path,
 # ----------- DragonBones assets -----------
 
 def add_dragonbones_data(project_path: str | Path, db_json_path: str | Path,
-                         atlas_json_path: str | Path, texture_paths: list[str | Path] | None = None,
+                         atlas_json_path: str | Path,
+                         texture_paths: Sequence[str | Path] | None = None,
                          rel_dir: str | None = None, uuid: str | None = None) -> dict:
     """Import DragonBones skeleton data into the project.
 
@@ -741,8 +763,8 @@ def add_dragonbones_data(project_path: str | Path, db_json_path: str | Path,
 # ----------- TiledMap assets -----------
 
 def add_tiled_map_asset(project_path: str | Path, tmx_path: str | Path,
-                        tsx_paths: list[str | Path] | None = None,
-                        texture_paths: list[str | Path] | None = None,
+                        tsx_paths: Sequence[str | Path] | None = None,
+                        texture_paths: Sequence[str | Path] | None = None,
                         rel_dir: str | None = None, uuid: str | None = None) -> dict:
     """Import a TiledMap (.tmx) and its tilesets into the project.
 
@@ -834,7 +856,7 @@ def add_tiled_map_asset(project_path: str | Path, tmx_path: str | Path,
 # ----------- SpriteAtlas -----------
 
 def create_sprite_atlas(project_path: str | Path, atlas_name: str,
-                        png_paths: list[str | Path],
+                        png_paths: Sequence[str | Path],
                         rel_dir: str | None = None,
                         uuid: str | None = None,
                         max_width: int = 2048, max_height: int = 2048) -> dict:
@@ -950,7 +972,9 @@ def generate_and_import_image(
 
     Returns {path, uuid, sprite_frame_uuid, generated_png, transparent_png}
     """
+    import os
     import subprocess
+    import sys
 
     # Use built-in scripts (shipped with cocos-mcp)
     cocos_dir = Path(__file__).resolve().parent
@@ -960,19 +984,17 @@ def generate_and_import_image(
     if not gen_py.exists():
         raise FileNotFoundError(f"gen_asset.py not found at {gen_py}")
 
-    # Load .env for ZHIPU_API_KEY if not in environment
+    # Load .env for ZHIPU_API_KEY if not in environment.
+    # Reuses gen_asset's parser so KEY="quoted-value" works identically here.
     env = dict(os.environ)
     if "ZHIPU_API_KEY" not in env:
+        from .gen_asset import _load_env_file
         env_file = cocos_dir.parent / ".env"
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip()
+        env.update(_load_env_file(env_file))
 
+    import tempfile
     p = Path(project_path).expanduser().resolve()
-    tmp_dir = Path("/tmp/cocos-mcp-gen")
+    tmp_dir = Path(tempfile.gettempdir()) / "cocos-mcp-gen"
     tmp_dir.mkdir(exist_ok=True)
 
     # 1. Generate image
