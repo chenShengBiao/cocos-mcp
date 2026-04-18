@@ -7,12 +7,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cocos.scene_builder import (
-    create_empty_scene, add_node, add_uitransform, add_label, add_sprite,
-    add_graphics, add_component, add_rigidbody2d, add_box_collider2d,
-    add_circle_collider2d, add_button, add_script, add_widget,
-    validate_scene, find_node_by_name, list_nodes, set_node_position,
-    set_node_active, move_node, delete_node, duplicate_node,
-    link_property, set_property, batch_ops, _auto_wrap_value,
+    _auto_wrap_value,
+    add_box_collider2d,
+    add_button,
+    add_component,
+    add_label,
+    add_node,
+    add_rigidbody2d,
+    add_script,
+    add_uitransform,
+    batch_ops,
+    create_empty_scene,
+    delete_node,
+    duplicate_node,
+    find_node_by_name,
+    move_node,
+    validate_scene,
 )
 
 
@@ -82,7 +92,7 @@ class TestNodeOps:
 
     def test_sibling_index(self):
         path, info = _tmp_scene()
-        n1 = add_node(path, info["canvas_node_id"], "First")
+        add_node(path, info["canvas_node_id"], "First")
         n2 = add_node(path, info["canvas_node_id"], "Second", sibling_index=0)
         with open(path) as f:
             data = json.load(f)
@@ -308,7 +318,8 @@ class TestNewComponents:
         gm = add_node(path, info["canvas_node_id"], "GM")
         btn_node = add_node(path, info["canvas_node_id"], "Btn")
         add_uitransform(path, btn_node, 200, 60)
-        from cocos.scene_builder import make_click_event, add_button as add_btn
+        from cocos.scene_builder import add_button as add_btn
+        from cocos.scene_builder import make_click_event
         evt = make_click_event(gm, "GameManager", "onRestart", "hello")
         cid = add_btn(path, btn_node, click_events=[evt])
         with open(path) as f:

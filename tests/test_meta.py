@@ -7,8 +7,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cocos.meta_util import (
-    script_ts_meta, scene_meta, prefab_meta,
-    new_sprite_frame_meta, upgrade_texture_to_sprite_frame,
+    new_sprite_frame_meta,
+    prefab_meta,
+    scene_meta,
+    script_ts_meta,
+    upgrade_texture_to_sprite_frame,
 )
 
 

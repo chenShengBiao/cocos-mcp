@@ -1,6 +1,7 @@
 """Tests for cocos.uuid_util."""
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cocos.uuid_util import compress_uuid, decompress_uuid, new_uuid
