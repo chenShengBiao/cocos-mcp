@@ -116,6 +116,7 @@ from .animation_presets import (
 )
 from .ui_lint import lint_ui
 from .ui_patterns import (
+    add_card_grid,
     add_dialog_modal,
     add_hud_bar,
     add_loading_spinner,

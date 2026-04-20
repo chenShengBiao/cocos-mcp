@@ -115,6 +115,35 @@ def register(mcp: FastMCP) -> None:
                                       icon_size, rotation_period)
 
     @mcp.tool()
+    def cocos_add_card_grid(scene_path: str, parent_node_id: int,
+                            cards: list[dict],
+                            columns: int = 3,
+                            card_width: int = 200,
+                            card_height: int = 240,
+                            spacing: int = 20) -> dict:
+        """Grid of tappable cards — level select, shop, character picker.
+
+        Each ``cards[i]`` is::
+
+            {"title": str,
+             "subtitle": str | None,
+             "icon_sprite_frame_uuid": str | None,
+             "variant": "primary" | "surface",    # bg color, default "surface"
+             "click_events": [...] | None}
+
+        Whole card is the button (tap anywhere). Title + subtitle auto-
+        pick contrasting text colors for the chosen variant ("primary"
+        variant gets bg-colored text; "surface" gets text-colored).
+        Extras wrap to new rows when count > columns.
+
+        Returns {grid_node_id, cards: [{node_id, title_node_id,
+        subtitle_node_id, icon_node_id, button_component_id}, ...]}.
+        Wire per-card click by passing ``click_events`` in each spec.
+        """
+        return sb.add_card_grid(scene_path, parent_node_id, cards, columns,
+                                card_width, card_height, spacing)
+
+    @mcp.tool()
     def cocos_add_hud_bar(scene_path: str, parent_node_id: int,
                           items: list[dict] | None = None,
                           height: int = 80,

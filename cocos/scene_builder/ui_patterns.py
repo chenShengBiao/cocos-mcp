@@ -504,6 +504,148 @@ def add_loading_spinner(scene_path: str | Path,
     }
 
 
+def add_card_grid(scene_path: str | Path,
+                  parent_id: int,
+                  cards: list[dict],
+                  columns: int = 3,
+                  card_width: int = 200,
+                  card_height: int = 240,
+                  spacing: int = 20) -> dict:
+    """Build a grid of tappable cards — level select, shop, character picker.
+
+    ``cards`` is a list of ``{"title": str, "subtitle": str?,
+    "icon_sprite_frame_uuid": str?, "variant": "primary"|"surface",
+    "click_events": [...]? }``. Each card renders as:
+
+      [ icon (top half, if sprite given) ]
+      [ title (heading-sized)            ]
+      [ subtitle (body-sized, dim)       ]
+
+    Laid out manually on a 2D grid (not cc.Layout GRID, which requires
+    an inspector-only ``cellSize`` field we don't expose). Grid is
+    centered on ``parent_id``'s UITransform origin. ``columns`` caps
+    how many cards per row; extras wrap to new rows below.
+
+    Returns::
+
+        {
+          "grid_node_id": int,
+          "cards": [
+            {"node_id": int, "title_node_id": int, "subtitle_node_id": int | None,
+             "icon_node_id": int | None, "button_component_id": int},
+            ...
+          ],
+        }
+    """
+    from . import (
+        add_button,
+        add_label,
+        add_node,
+        add_sprite,
+        add_uitransform,
+    )
+
+    if not cards:
+        raise ValueError("cards must be a non-empty list")
+    if columns < 1:
+        raise ValueError(f"columns must be ≥ 1, got {columns}")
+
+    # Grid container node. Its UITransform spans the full grid so callers
+    # can anchor / Widget it as a single block.
+    n_rows = (len(cards) + columns - 1) // columns
+    grid_w = columns * card_width + (columns - 1) * spacing
+    grid_h = n_rows * card_height + (n_rows - 1) * spacing
+
+    grid = add_node(scene_path, parent_id, "CardGrid")
+    add_uitransform(scene_path, grid, grid_w, grid_h)
+
+    # Starting offset so the grid is centered on grid's own origin.
+    # Card centers sit at -grid_w/2 + card_w/2 + col * (card_w + spacing)
+    # and the equivalent on Y. Y grows downward in our layout so the
+    # first row is at the top.
+    start_x = -grid_w / 2 + card_width / 2
+    start_y = grid_h / 2 - card_height / 2
+
+    body_font = resolve_size(scene_path, "body")
+    heading_font = resolve_size(scene_path, "heading")
+    spacing_sm = resolve_spacing(scene_path, "sm")
+
+    card_results: list[dict] = []
+
+    for idx, spec in enumerate(cards):
+        row = idx // columns
+        col = idx % columns
+        cx = start_x + col * (card_width + spacing)
+        cy = start_y - row * (card_height + spacing)
+
+        card = add_node(scene_path, grid, f"Card_{idx}",
+                        lpos=(cx, cy, 0))
+        add_uitransform(scene_path, card, card_width, card_height)
+
+        # Card background. "primary" variant uses the theme primary color
+        # (useful for the 'featured' card); default is surface.
+        variant = spec.get("variant", "surface")
+        bg_preset = "primary" if variant == "primary" else "surface"
+        add_sprite(scene_path, card, color_preset=bg_preset)
+
+        # Whole card is tappable — attach cc.Button so it gets hover /
+        # press visual feedback AND the click event binding.
+        btn_cid = add_button(scene_path, card,
+                             color_preset=bg_preset,
+                             click_events=spec.get("click_events"))
+
+        # Icon occupies the top ~60% if provided; otherwise text takes
+        # the full card.
+        icon_node: int | None = None
+        has_icon = bool(spec.get("icon_sprite_frame_uuid"))
+        if has_icon:
+            icon_h = int(card_height * 0.55)
+            icon_node = add_node(scene_path, card, "Icon",
+                                 lpos=(0, card_height / 2 - icon_h / 2 - 10, 0))
+            add_uitransform(scene_path, icon_node, card_width - 40, icon_h - 20)
+            add_sprite(scene_path, icon_node,
+                       sprite_frame_uuid=spec["icon_sprite_frame_uuid"])
+
+        # Title: heading-sized, sitting below icon (or centered if no icon).
+        # Text color contrasts with the card bg — primary bg needs bg-
+        # preset label; surface bg uses text preset.
+        label_color = "bg" if variant == "primary" else "text"
+        title_y = (-card_height / 2 + heading_font + 40) if has_icon \
+            else card_height / 4
+        title_node = add_node(scene_path, card, "Title",
+                              lpos=(0, title_y, 0))
+        add_uitransform(scene_path, title_node, card_width - 20,
+                        heading_font + 12)
+        add_label(scene_path, title_node, spec["title"],
+                  color_preset=label_color, size_preset="heading",
+                  h_align=1, v_align=1, overflow=2)  # SHRINK
+
+        subtitle_node: int | None = None
+        if spec.get("subtitle"):
+            sub_y = title_y - heading_font - spacing_sm
+            subtitle_node = add_node(scene_path, card, "Subtitle",
+                                     lpos=(0, sub_y, 0))
+            add_uitransform(scene_path, subtitle_node,
+                            card_width - 20, body_font + 8)
+            sub_color = "bg" if variant == "primary" else "text_dim"
+            add_label(scene_path, subtitle_node, spec["subtitle"],
+                      color_preset=sub_color, size_preset="body",
+                      h_align=1, v_align=1, overflow=2)
+
+        card_results.append({
+            "node_id": card,
+            "title_node_id": title_node,
+            "subtitle_node_id": subtitle_node,
+            "icon_node_id": icon_node,
+            "button_component_id": btn_cid,
+        })
+
+    return {
+        "grid_node_id": grid,
+        "cards": card_results,
+    }
+
+
 def add_hud_bar(scene_path: str | Path,
                 parent_id: int,
                 items: list[dict] | None = None,
