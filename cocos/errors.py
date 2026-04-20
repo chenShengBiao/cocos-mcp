@@ -99,3 +99,48 @@ def classify_build_log(log_tail: str) -> tuple[str, str] | None:
         if pattern.search(log_tail):
             return code, hint
     return None
+
+
+# Per-error regex for TypeScript compile failures. Captures the file,
+# line, column, TS error code, and the message on the same line. The
+# Cocos build log echoes the tsc diagnostic format verbatim, which is
+# the format `tsc` itself prints: ``foo.ts:9:3 - error TS2304: ...``.
+# Skip the exact-file match (we don't care if it's absolute or relative
+# on this caller's platform) and just grab everything up to the first
+# colon followed by digits.
+_TS_ERROR_LINE = re.compile(
+    r"^(?P<file>[^\s:]+\.ts):(?P<line>\d+):(?P<col>\d+)\s*-\s*"
+    r"error\s+(?P<code>TS\d+):\s*(?P<message>.+?)$",
+    re.MULTILINE,
+)
+
+
+def parse_ts_errors(log_tail: str) -> list[dict]:
+    """Extract structured TypeScript errors from a build log tail.
+
+    Returns a list of ``{file, line, col, code, message}`` dicts, one per
+    diagnostic line in the log. Empty list when none match — callers
+    treat that as "either no TS errors, or the format changed and we
+    need a new regex".
+
+    Strips the ``tsc``-style context lines (they follow each error line
+    with source code + caret) since those aren't on the diagnostic line
+    and don't match the header regex anyway.
+    """
+    if not log_tail:
+        return []
+    out: list[dict] = []
+    for m in _TS_ERROR_LINE.finditer(log_tail):
+        try:
+            out.append({
+                "file": m.group("file"),
+                "line": int(m.group("line")),
+                "col": int(m.group("col")),
+                "code": m.group("code"),
+                "message": m.group("message").rstrip("."),
+            })
+        except (ValueError, AttributeError):
+            # Regex guarantees int-convertible line/col and named groups,
+            # but fail-open rather than raise into the build-result path.
+            continue
+    return out

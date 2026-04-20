@@ -1,5 +1,18 @@
 """Cocos Creator install detection + project init from template.
 
+Three discovery paths, tried in order:
+
+1. ``COCOS_CREATOR_PATH`` env var — highest precedence. If set, it should
+   point at a single Creator install root (the directory whose name is the
+   version, e.g. ``/custom/path/3.8.6``) and becomes the ONLY install the
+   server sees. Overrides everything else so users with weird install
+   locations have a simple escape hatch.
+2. Auto-scan: platform default roots (``INSTALL_ROOTS``) plus any extra
+   roots in ``COCOS_CREATOR_EXTRA_ROOTS`` (colon/semicolon-separated on
+   POSIX/Windows respectively).
+3. ``$PATH`` probe: if a ``CocosCreator`` binary is reachable via the
+   shell's PATH we back-walk to the install root and include it.
+
 Why ``find_creator`` looks ``list_creator_installs`` up lazily through the
 package: tests and examples monkeypatch ``cocos.project.list_creator_installs``
 (via ``monkeypatch.setattr(cp, "list_creator_installs", ...)``). A bare
@@ -12,13 +25,16 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
 
 from ..uuid_util import new_uuid
 
-# Where Cocos Dashboard installs Creator on each platform
+# Where Cocos Dashboard installs Creator on each platform. Users with
+# non-standard setups can add more via COCOS_CREATOR_EXTRA_ROOTS (see
+# module docstring).
 INSTALL_ROOTS = {
     "darwin": [Path("/Applications/Cocos/Creator")],
     "win32": [Path("C:/CocosDashboard/Creator"), Path("C:/Program Files/Cocos/Creator")],
@@ -26,32 +42,125 @@ INSTALL_ROOTS = {
 }
 
 
+def _paths_for_creator_binary(exe: Path) -> tuple[Path, Path] | None:
+    """Given a resolved CocosCreator executable path, return (version_dir,
+    template_dir) or None if the layout doesn't look like a Creator install.
+
+    Creator's on-disk layout is the same whether the install lives at
+    /Applications/Cocos/Creator/3.8.6/ or some custom directory, so the
+    derivation rules are uniform — the difference is which side of the
+    ``.app`` bundle you're on (macOS) vs a plain dir (Windows/Linux).
+    """
+    exe = exe.resolve()
+    if sys.platform == "darwin":
+        # /<version_dir>/CocosCreator.app/Contents/MacOS/CocosCreator
+        app = exe.parent.parent.parent
+        if app.suffix != ".app":
+            return None
+        version_dir = app.parent
+        template_dir = app / "Contents/Resources/templates"
+    else:
+        # /<version_dir>/CocosCreator(.exe)
+        version_dir = exe.parent
+        template_dir = version_dir / "resources/templates"
+    if not version_dir.exists():
+        return None
+    return version_dir, template_dir
+
+
+def _entry_for_version_dir(version_dir: Path) -> dict | None:
+    """Build a ``{version, exe, template_dir}`` entry from a Creator
+    version directory. Returns None if the expected binary is missing."""
+    if not version_dir.is_dir():
+        return None
+    if sys.platform == "darwin":
+        exe = version_dir / "CocosCreator.app/Contents/MacOS/CocosCreator"
+        template_dir = version_dir / "CocosCreator.app/Contents/Resources/templates"
+    elif sys.platform == "win32":
+        exe = version_dir / "CocosCreator.exe"
+        template_dir = version_dir / "resources/templates"
+    else:
+        exe = version_dir / "CocosCreator"
+        template_dir = version_dir / "resources/templates"
+    if not exe.exists():
+        return None
+    return {
+        "version": version_dir.name,
+        "exe": str(exe),
+        "template_dir": str(template_dir) if template_dir.exists() else None,
+    }
+
+
+def _scan_root(root: Path) -> list[dict]:
+    """Scan ``<root>/<version>/`` for installed Creators."""
+    if not root.exists():
+        return []
+    out: list[dict] = []
+    for child in root.iterdir():
+        entry = _entry_for_version_dir(child)
+        if entry is not None:
+            out.append(entry)
+    return out
+
+
+def _extra_roots_from_env() -> list[Path]:
+    raw = os.environ.get("COCOS_CREATOR_EXTRA_ROOTS", "")
+    if not raw:
+        return []
+    # Windows uses ';' in PATH-like vars; POSIX uses ':'. Accept both.
+    sep = ";" if sys.platform == "win32" else ":"
+    return [Path(p).expanduser() for p in raw.split(sep) if p.strip()]
+
+
+def _probe_path_for_creator() -> dict | None:
+    """If ``CocosCreator`` is on $PATH, return its entry.
+
+    This lets users with symlinks / custom installs just make the binary
+    reachable the normal way instead of hunting for the right env var.
+    """
+    for name in ("CocosCreator", "CocosCreator.exe"):
+        resolved = shutil.which(name)
+        if not resolved:
+            continue
+        got = _paths_for_creator_binary(Path(resolved))
+        if got is None:
+            continue
+        version_dir, _template_dir = got
+        entry = _entry_for_version_dir(version_dir)
+        if entry is not None:
+            return entry
+    return None
+
+
 @functools.lru_cache(maxsize=1)
 def _list_creator_installs_cached() -> tuple[dict, ...]:
-    roots = INSTALL_ROOTS.get(sys.platform, [Path("/Applications/Cocos/Creator")])
+    # (1) explicit pin via COCOS_CREATOR_PATH beats all auto-discovery
+    pinned = os.environ.get("COCOS_CREATOR_PATH", "").strip()
+    if pinned:
+        entry = _entry_for_version_dir(Path(pinned).expanduser())
+        if entry is not None:
+            return (entry,)
+        # Pin was set but doesn't look like a Creator install — fall through
+        # to auto-discovery rather than silently acting as if it wasn't set.
+        # The next error message will tell the user what's wrong.
+
+    seen_exes: set[str] = set()
     out: list[dict] = []
+
+    # (2) default platform roots + user-supplied extras
+    roots = list(INSTALL_ROOTS.get(sys.platform, [Path("/Applications/Cocos/Creator")]))
+    roots.extend(_extra_roots_from_env())
     for root in roots:
-        if not root.exists():
-            continue
-        for child in root.iterdir():
-            if not child.is_dir():
-                continue
-            version = child.name
-            if sys.platform == "darwin":
-                exe = child / "CocosCreator.app/Contents/MacOS/CocosCreator"
-                template_dir = child / "CocosCreator.app/Contents/Resources/templates"
-            elif sys.platform == "win32":
-                exe = child / "CocosCreator.exe"
-                template_dir = child / "resources/templates"
-            else:
-                exe = child / "CocosCreator"
-                template_dir = child / "resources/templates"
-            if exe.exists():
-                out.append({
-                    "version": version,
-                    "exe": str(exe),
-                    "template_dir": str(template_dir) if template_dir.exists() else None,
-                })
+        for entry in _scan_root(root):
+            if entry["exe"] not in seen_exes:
+                seen_exes.add(entry["exe"])
+                out.append(entry)
+
+    # (3) whatever's on PATH
+    path_entry = _probe_path_for_creator()
+    if path_entry is not None and path_entry["exe"] not in seen_exes:
+        out.append(path_entry)
+
     return tuple(out)
 
 
@@ -79,9 +188,13 @@ def find_creator(version_prefix: str | None = None) -> dict:
     installs = _lci()
     if not installs:
         raise RuntimeError(
-            "no Cocos Creator install found locally — install from "
-            "https://www.cocos.com/creator-download, then call "
-            "cocos_list_creator_installs to verify before retrying"
+            "no Cocos Creator install found locally. Try, in order:\n"
+            "  1. Install from https://www.cocos.com/creator-download\n"
+            "  2. If Creator lives in a non-standard location, set\n"
+            "     COCOS_CREATOR_PATH=/path/to/3.8.6 (the version directory)\n"
+            "  3. Or add the parent directory to COCOS_CREATOR_EXTRA_ROOTS\n"
+            "  4. Or put the CocosCreator binary on your $PATH\n"
+            "Then call cocos_list_creator_installs to verify."
         )
     if version_prefix:
         matching = [i for i in installs if i["version"].startswith(version_prefix)]

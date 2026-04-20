@@ -102,6 +102,10 @@ from .media import (
     set_shadows,
     set_skybox,
 )
+from .modules import (
+    COMPONENT_REQUIRES_MODULE,
+    audit_scene_modules,
+)
 from .physics import (
     _attach_joint,
     _make_joint2d_base,
@@ -398,8 +402,13 @@ def add_script(scene_path: str | Path, node_id: int, script_uuid_compressed: str
                props: dict | None = None) -> int:
     """Attach a custom TS script component to a node.
 
-    `script_uuid_compressed` is the 23-char short form (use compress_uuid()
-    on the script's .ts.meta uuid).
+    Accepts either the **23-char compressed form** (e.g.
+    ``5372db1cHxxxxxxxxxxxxxxxx``, what Cocos actually reads at runtime)
+    or the **36-char standard UUID form** (e.g.
+    ``e7cd3e37-82db-...``, what ``.ts.meta`` files and
+    ``cocos_list_assets`` return). Standard form is auto-compressed
+    here — passing it unmodified used to be a silent bug (the engine
+    couldn't resolve the class and the component became a no-op).
 
     `props` values are passed as-is. To reference a node/component, pass
     ``{"__id__": N}`` explicitly. To reference a resource (Prefab, SpriteFrame),
@@ -416,10 +425,18 @@ def add_script(scene_path: str | Path, node_id: int, script_uuid_compressed: str
             "prefab": {"__uuid__": prefab_uuid},       # resource ref
         })
     """
+    # Auto-convert full UUIDs to the short form. A standard UUID is
+    # 36 chars with dashes at positions 8,13,18,23; compressed form is
+    # 23 chars with no dashes.
+    uuid = script_uuid_compressed
+    if len(uuid) == 36 and uuid.count("-") == 4:
+        from ..uuid_util import compress_uuid
+        uuid = compress_uuid(uuid)
+
     s = _load_scene(scene_path)
     # No auto-wrapping — all values passed as-is to avoid the int→ref footgun
     # (e.g. playerId: 1 should NOT become {"__id__": 1})
-    cid = _attach_component(s, node_id, _make_script_component(script_uuid_compressed, node_id, props))
+    cid = _attach_component(s, node_id, _make_script_component(uuid, node_id, props))
     _save_scene(scene_path, s)
     return cid
 

@@ -38,11 +38,15 @@ class BuildResult(_BuildCommon, total=False):
 
     Fields from ``_BuildCommon`` are always present. ``error_code``,
     ``hint``, ``error``, and ``timed_out`` appear only on failure.
+    ``ts_errors`` is additionally present when ``error_code`` is
+    ``BUILD_TYPESCRIPT_ERROR`` and the log tail yielded a parseable
+    diagnostic — each entry is ``{file, line, col, code, message}``.
     """
     error_code: str
     hint: str
     error: str
     timed_out: bool
+    ts_errors: list[dict]
 
 
 class _PreviewStartCommon(TypedDict):

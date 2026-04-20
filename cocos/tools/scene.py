@@ -227,8 +227,35 @@ def register(mcp: FastMCP) -> None:
         Returns {valid: bool, object_count: int, issues: [...]}. Run this
         after building a scene to catch dangling __id__ references before
         invoking `cocos_build`.
+
+        NOTE: structural-only. To check whether the scene's components
+        match the project's enabled engine modules (the "build succeeds
+        but RigidBody2D doesn't work" class of bugs), also call
+        `cocos_audit_scene_modules`.
         """
         return sb.validate_scene(scene_path)
+
+    @mcp.tool()
+    def cocos_audit_scene_modules(scene_path: str,
+                                  project_path: str | None = None) -> dict:
+        """Cross-check scene components against the project's engine.json.
+
+        Catches the single highest-frequency "build succeeded, game broken
+        at runtime" failure: using a component (RigidBody2D, Spine,
+        VideoPlayer, ...) whose engine module is currently disabled.
+        Build produces artifacts, the scene loads, but the components
+        silently do nothing.
+
+        ``project_path=None`` → walks up from the scene file looking for
+        package.json. Pass explicitly when the scene lives outside the
+        project (prefab library, template copy).
+
+        Returns {ok, project_path, required, enabled, disabled, actions}.
+        When ok=False, actions lists copy-pasteable next steps
+        (cocos_set_engine_module calls + the library clean that
+        module changes need).
+        """
+        return sb.audit_scene_modules(scene_path, project_path)
 
     @mcp.tool()
     def cocos_get_object_count(scene_path: str) -> int:

@@ -15,7 +15,9 @@ from typing import Any
 from .errors import (
     BUILD_FAILED,
     BUILD_TIMEOUT,
+    BUILD_TYPESCRIPT_ERROR,
     classify_build_log,
+    parse_ts_errors,
 )
 from .project import find_creator
 from .types import BuildResult, PreviewStartResult, PreviewStatusResult, PreviewStopResult
@@ -186,6 +188,13 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
             code, hint = classified
             result["error_code"] = code
             result["hint"] = hint
+            # For TS errors, also surface the structured per-diagnostic list
+            # so the caller can open+edit each offending file directly
+            # without re-parsing the log tail.
+            if code == BUILD_TYPESCRIPT_ERROR:
+                ts_errors = parse_ts_errors(log_tail)
+                if ts_errors:
+                    result["ts_errors"] = ts_errors
         else:
             result["error_code"] = BUILD_FAILED
             result["hint"] = (f"generic build failure (exit_code={exit_code}); "
