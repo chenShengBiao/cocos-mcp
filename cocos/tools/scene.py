@@ -66,15 +66,19 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool()
     def cocos_add_sprite(scene_path: str, node_id: int, sprite_frame_uuid: str | None = None,
                          size_mode: int = 0,
-                         color_r: int = 255, color_g: int = 255, color_b: int = 255, color_a: int = 255) -> int:
+                         color_r: int = 255, color_g: int = 255, color_b: int = 255, color_a: int = 255,
+                         color_preset: str | None = None) -> int:
         """Attach a cc.Sprite to a node.
 
         `sprite_frame_uuid` is the `<uuid>@f9941` form returned by
         `cocos_add_image` or `cocos_get_sprite_frame_uuid`.
         `size_mode`: 0=CUSTOM (use UITransform's contentSize), 1=TRIMMED, 2=RAW.
+        `color_preset`: pick from the project's UI theme (e.g. "primary",
+        "surface") to tint the sprite — overrides the explicit RGBA args.
         """
         return sb.add_sprite(scene_path, node_id, sprite_frame_uuid, size_mode,
-                             (color_r, color_g, color_b, color_a))
+                             (color_r, color_g, color_b, color_a),
+                             color_preset=color_preset)
 
     @mcp.tool()
     def cocos_add_label(scene_path: str, node_id: int, text: str, font_size: int = 40,
@@ -82,13 +86,26 @@ def register(mcp: FastMCP) -> None:
                         h_align: int = 1, v_align: int = 1,
                         overflow: int = 0, enable_wrap: bool = False, line_height: int = 0,
                         enable_outline: bool = True, outline_width: int = 3,
-                        cache_mode: int = 0) -> int:
+                        cache_mode: int = 0,
+                        color_preset: str | None = None,
+                        size_preset: str | None = None,
+                        outline_color_preset: str | None = None) -> int:
         """Attach cc.Label. overflow: 0=NONE 1=CLAMP 2=SHRINK 3=RESIZE_HEIGHT.
-        cache_mode: 0=NONE 1=BITMAP 2=CHAR. CLAMP truncates, SHRINK auto-shrinks font."""
+        cache_mode: 0=NONE 1=BITMAP 2=CHAR. CLAMP truncates, SHRINK auto-shrinks font.
+
+        Design-token presets (override the equivalent explicit arg):
+          - ``color_preset``: e.g. ``"text"``, ``"primary"``, ``"danger"``
+          - ``size_preset``: ``"title"`` | ``"heading"`` | ``"body"`` | ``"caption"``
+          - ``outline_color_preset``: e.g. ``"bg"`` for dark outline on light
+        Set the theme once via ``cocos_set_ui_theme``; un-themed projects
+        fall back to ``dark_game`` defaults so presets always resolve.
+        """
         return sb.add_label(scene_path, node_id, text, font_size,
                             (color_r, color_g, color_b, color_a), h_align, v_align,
                             overflow, enable_wrap, line_height, enable_outline,
-                            (0, 0, 0, 255), outline_width, cache_mode)
+                            (0, 0, 0, 255), outline_width, cache_mode,
+                            color_preset=color_preset, size_preset=size_preset,
+                            outline_color_preset=outline_color_preset)
 
     @mcp.tool()
     def cocos_add_graphics(scene_path: str, node_id: int) -> int:
@@ -234,6 +251,20 @@ def register(mcp: FastMCP) -> None:
         `cocos_audit_scene_modules`.
         """
         return sb.validate_scene(scene_path)
+
+    @mcp.tool()
+    def cocos_lint_ui(scene_path: str) -> dict:
+        """Non-structural UI quality check (complement to cocos_validate_scene).
+
+        Flags issues that build + load cleanly but produce bad UX:
+          - Button touch target below 44×44 (iOS HIG / Material 48dp min)
+          - Label overflow=NONE + wrap off in a box that likely clips the text
+          - UI component on a node with layer != UI_2D (UICamera won't render it)
+
+        Returns {ok, scene_path, warnings:[{rule, node_id, node_name, message}]}.
+        All warnings are non-fatal; the caller decides what to fix.
+        """
+        return sb.lint_ui(scene_path)
 
     @mcp.tool()
     def cocos_audit_scene_modules(scene_path: str,

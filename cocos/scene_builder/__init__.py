@@ -106,6 +106,7 @@ from .modules import (
     COMPONENT_REQUIRES_MODULE,
     audit_scene_modules,
 )
+from .ui_lint import lint_ui
 from .physics import (
     _attach_joint,
     _make_joint2d_base,
@@ -361,7 +362,13 @@ def add_uitransform(scene_path: str | Path, node_id: int, width: float, height: 
 
 
 def add_sprite(scene_path: str | Path, node_id: int, sprite_frame_uuid: str | None = None,
-               size_mode: int = 0, color: tuple = (255, 255, 255, 255)) -> int:
+               size_mode: int = 0, color: tuple = (255, 255, 255, 255),
+               color_preset: str | None = None) -> int:
+    """``color_preset`` (e.g. ``"primary"``, ``"surface"``) overrides
+    ``color`` when given, looking the name up in the project's UI theme."""
+    if color_preset is not None:
+        from ..project.ui_tokens import resolve_color
+        color = resolve_color(scene_path, color_preset, alpha=color[3] if len(color) > 3 else 255)
     s = _load_scene(scene_path)
     cid = _attach_component(s, node_id, _make_sprite(node_id, sprite_frame_uuid, size_mode, color))
     _save_scene(scene_path, s)
@@ -372,9 +379,29 @@ def add_label(scene_path: str | Path, node_id: int, text: str, font_size: int = 
               color: tuple = (255, 255, 255, 255), h_align: int = 1, v_align: int = 1,
               overflow: int = 0, enable_wrap: bool = False, line_height: int = 0,
               enable_outline: bool = True, outline_color: tuple = (0, 0, 0, 255),
-              outline_width: int = 3, cache_mode: int = 0) -> int:
+              outline_width: int = 3, cache_mode: int = 0,
+              color_preset: str | None = None,
+              size_preset: str | None = None,
+              outline_color_preset: str | None = None) -> int:
     """overflow: 0=NONE, 1=CLAMP, 2=SHRINK, 3=RESIZE_HEIGHT.
-    cache_mode: 0=NONE, 1=BITMAP, 2=CHAR."""
+    cache_mode: 0=NONE, 1=BITMAP, 2=CHAR.
+
+    Design-token presets (override the equivalent explicit arg when given):
+      - ``color_preset``: e.g. ``"text"``, ``"primary"``, ``"danger"``
+      - ``size_preset``: ``"title"`` | ``"heading"`` | ``"body"`` | ``"caption"``
+      - ``outline_color_preset``: e.g. ``"bg"`` for a dark outline on light themes
+    Presets resolve through the project's UI theme — set it once via
+    ``cocos_set_ui_theme``. Un-themed projects fall back to ``dark_game``.
+    """
+    if color_preset is not None or size_preset is not None or outline_color_preset is not None:
+        from ..project.ui_tokens import resolve_color, resolve_size
+        if color_preset is not None:
+            color = resolve_color(scene_path, color_preset, alpha=color[3] if len(color) > 3 else 255)
+        if size_preset is not None:
+            font_size = resolve_size(scene_path, size_preset)
+        if outline_color_preset is not None:
+            outline_color = resolve_color(scene_path, outline_color_preset,
+                                          alpha=outline_color[3] if len(outline_color) > 3 else 255)
     s = _load_scene(scene_path)
     cid = _attach_component(s, node_id, _make_label(
         node_id, text, font_size, color, h_align, v_align,

@@ -211,3 +211,64 @@ def register(mcp: FastMCP) -> None:
                 "prefab_info": 12,
             },
         }
+
+    # ---------------- UI design tokens ----------------
+
+    @mcp.tool()
+    def cocos_set_ui_theme(project_path: str,
+                           theme: str | None = None,
+                           custom: dict | None = None) -> dict:
+        """Pin a UI theme so every subsequent ``cocos_add_label`` /
+        ``cocos_add_button`` / ``cocos_add_sprite`` call with
+        ``color_preset=…`` / ``size_preset=…`` resolves through the
+        same design tokens — produces a visually consistent game.
+
+        Built-in theme names: ``dark_game``, ``light_minimal``,
+        ``neon_arcade``, ``pastel_cozy``, ``corporate``. Pass a
+        ``custom`` dict (``{color, font_size, spacing, radius}``) for
+        something bespoke — missing preset names fall through to
+        ``dark_game`` defaults so no lookup ever fails.
+
+        Preset vocabulary every theme MUST provide:
+          color: primary / secondary / bg / surface / text / text_dim /
+                 success / warn / danger / border (10)
+          font_size: title / heading / body / caption (4)
+          spacing:   xs / sm / md / lg / xl (5)
+          radius:    sm / md / lg / pill (4)
+
+        Calling with no args pins ``dark_game``.
+        """
+        return cp.set_ui_theme(project_path, theme, custom)
+
+    @mcp.tool()
+    def cocos_get_ui_tokens(project_path: str) -> dict:
+        """Return the project's active UI theme (fully resolved).
+
+        Always returns a complete theme — un-themed projects get the
+        ``dark_game`` default with ``source='fallback'``. Source is
+        ``'registry'`` when the project has explicitly pinned a theme.
+        """
+        return cp.get_ui_tokens(project_path)
+
+    @mcp.tool()
+    def cocos_list_builtin_themes() -> dict:
+        """Return all five bundled UI themes verbatim.
+
+        Useful for previewing the palette before pinning one, or as a
+        starting point for a ``custom=`` override passed to
+        ``cocos_set_ui_theme``.
+        """
+        return cp.list_builtin_themes()
+
+    @mcp.tool()
+    def cocos_hex_to_rgba(hex_color: str, alpha: int = 255) -> dict:
+        """Convert ``#rrggbb`` / ``#rgb`` / ``#rrggbbaa`` to RGBA ints.
+
+        Returns ``{r, g, b, a}`` suitable for any tool that takes
+        ``color_r``/``color_g``/``color_b``/``color_a`` params.
+        Lets the caller paste CSS / design-tool hex codes without
+        hand-translating to int quadruples (a common source of off-by-one
+        color bugs).
+        """
+        r, g, b, a = cp.hex_to_rgba(hex_color, alpha=alpha)
+        return {"r": r, "g": g, "b": b, "a": a}

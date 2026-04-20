@@ -88,17 +88,61 @@ def _serialize_events(s: list, events: list[dict] | None) -> list:
 
 # ----------- widgets -----------
 
+def _derive_button_states(base_rgba: tuple) -> tuple[tuple, tuple, tuple]:
+    """From a primary button color, derive hover (slightly lighter),
+    pressed (slightly darker), and disabled (desaturated gray) colors.
+
+    Keeps the feel consistent — three hand-picked greys would jar against
+    a theme-coloured primary. Multipliers below are eyeballed against the
+    bundled themes; they don't aim for strict WCAG ratios."""
+    r, g, b = base_rgba[0], base_rgba[1], base_rgba[2]
+    a = base_rgba[3] if len(base_rgba) > 3 else 255
+
+    def _clamp(v: int) -> int:
+        return max(0, min(255, v))
+
+    hover = (_clamp(int(r * 1.12)), _clamp(int(g * 1.12)), _clamp(int(b * 1.12)), a)
+    pressed = (_clamp(int(r * 0.78)), _clamp(int(g * 0.78)), _clamp(int(b * 0.78)), a)
+    # Disabled: gray derived from the primary's luminance, so dark and
+    # light themes both produce a sensible gray at the same step.
+    luma = int(0.299 * r + 0.587 * g + 0.114 * b)
+    gray = _clamp(int(luma * 0.55 + 60))
+    disabled = (gray, gray, gray, a)
+    return hover, pressed, disabled
+
+
 def add_button(scene_path: str | Path, node_id: int,
                transition: int = 2, zoom_scale: float = 1.1,
                normal_color: tuple = (255, 255, 255, 255),
                hover_color: tuple = (211, 211, 211, 255),
                pressed_color: tuple = (150, 150, 150, 255),
                disabled_color: tuple = (124, 124, 124, 255),
-               click_events: list[dict] | None = None) -> int:
+               click_events: list[dict] | None = None,
+               color_preset: str | None = None) -> int:
     """Attach cc.Button. transition: 0=NONE, 1=COLOR, 2=SCALE, 3=SPRITE.
 
     Use ``make_click_event()`` to build entries for ``click_events``.
+
+    ``color_preset`` (e.g. ``"primary"``, ``"secondary"``, ``"danger"``)
+    sets ``normal_color`` from the project's UI theme AND derives
+    matching ``hover`` / ``pressed`` / ``disabled`` shades (explicit
+    values for those still win if also passed).
     """
+    if color_preset is not None:
+        from ..project.ui_tokens import resolve_color
+        normal_color = resolve_color(scene_path, color_preset,
+                                     alpha=normal_color[3] if len(normal_color) > 3 else 255)
+        # Only auto-derive states when caller didn't pin them explicitly.
+        # A caller passing e.g. hover_color=... alongside color_preset means
+        # "preset for normal, but I want a specific hover" — respect that.
+        auto_hover, auto_pressed, auto_disabled = _derive_button_states(normal_color)
+        if hover_color == (211, 211, 211, 255):
+            hover_color = auto_hover
+        if pressed_color == (150, 150, 150, 255):
+            pressed_color = auto_pressed
+        if disabled_color == (124, 124, 124, 255):
+            disabled_color = auto_disabled
+
     s = _load_scene(scene_path)
     # Build click events — they are inline objects in the scene array
     serialized_events = []
@@ -287,8 +331,23 @@ def add_richtext(scene_path: str | Path, node_id: int,
                  font_size: int = 40,
                  max_width: float = 0,
                  line_height: float = 40,
-                 horizontal_align: int = 0) -> int:
-    """Attach cc.RichText. Supports <b>, <i>, <color>, <size>, <img> tags."""
+                 horizontal_align: int = 0,
+                 size_preset: str | None = None) -> int:
+    """Attach cc.RichText. Supports <b>, <i>, <color>, <size>, <img> tags.
+
+    ``size_preset`` (``"title"``/``"heading"``/``"body"``/``"caption"``)
+    overrides ``font_size`` and sets ``line_height`` to ~1.25× of it for
+    a readable default. Explicit ``font_size`` / ``line_height`` args
+    take precedence when also given.
+    """
+    if size_preset is not None:
+        from ..project.ui_tokens import resolve_size
+        resolved = resolve_size(scene_path, size_preset)
+        # Only override when caller didn't hand-pick — mirrors add_button.
+        if font_size == 40:
+            font_size = resolved
+        if line_height == 40:
+            line_height = int(resolved * 1.25)
     from cocos.scene_builder import add_component
     return add_component(scene_path, node_id, "cc.RichText", {
         "_lineHeight": line_height,

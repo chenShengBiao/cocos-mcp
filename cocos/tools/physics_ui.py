@@ -206,8 +206,14 @@ def register(mcp: FastMCP) -> None:
                          pressed_color_r: int = 150, pressed_color_g: int = 150,
                          pressed_color_b: int = 150, pressed_color_a: int = 255,
                          disabled_color_r: int = 124, disabled_color_g: int = 124,
-                         disabled_color_b: int = 124, disabled_color_a: int = 255) -> int:
+                         disabled_color_b: int = 124, disabled_color_a: int = 255,
+                         color_preset: str | None = None) -> int:
         """Attach cc.Button. transition: 0=NONE, 1=COLOR, 2=SCALE, 3=SPRITE.
+
+        ``color_preset`` (e.g. ``"primary"``, ``"secondary"``, ``"danger"``)
+        sets normal_color from the project's UI theme AND auto-derives
+        matching hover / pressed / disabled shades — pass explicit RGBA
+        args only when you want to override those derived values.
 
         click_events: list of dicts from cocos_make_click_event(). Each binds a
         button press to a script method. Example:
@@ -219,7 +225,7 @@ def register(mcp: FastMCP) -> None:
                              (hover_color_r, hover_color_g, hover_color_b, hover_color_a),
                              (pressed_color_r, pressed_color_g, pressed_color_b, pressed_color_a),
                              (disabled_color_r, disabled_color_g, disabled_color_b, disabled_color_a),
-                             click_events)
+                             click_events, color_preset=color_preset)
 
     @mcp.tool()
     def cocos_add_layout(scene_path: str, node_id: int,

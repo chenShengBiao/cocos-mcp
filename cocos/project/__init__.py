@@ -49,6 +49,21 @@ from .skeletal import (
     add_spine_data,
 )
 from .tiled import add_tiled_map_asset
+from .ui_tokens import (
+    BUILTIN_THEMES,
+    COLOR_NAMES,
+    RADIUS_NAMES,
+    SIZE_NAMES,
+    SPACING_NAMES,
+    get_ui_tokens,
+    hex_to_rgba,
+    list_builtin_themes,
+    resolve_color,
+    resolve_radius,
+    resolve_size,
+    resolve_spacing,
+    set_ui_theme,
+)
 
 __all__ = [
     "INSTALL_ROOTS",
@@ -73,4 +88,18 @@ __all__ = [
     "list_post_build_patches",
     "register_post_build_patches",
     "remove_post_build_patches",
+    # UI design tokens
+    "BUILTIN_THEMES",
+    "COLOR_NAMES",
+    "SIZE_NAMES",
+    "SPACING_NAMES",
+    "RADIUS_NAMES",
+    "set_ui_theme",
+    "get_ui_tokens",
+    "list_builtin_themes",
+    "hex_to_rgba",
+    "resolve_color",
+    "resolve_size",
+    "resolve_spacing",
+    "resolve_radius",
 ]

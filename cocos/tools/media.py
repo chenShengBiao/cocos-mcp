@@ -244,10 +244,17 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool()
     def cocos_add_richtext(scene_path: str, node_id: int, text: str = "<b>Hello</b>",
                            font_size: int = 40, max_width: float = 0,
-                           line_height: float = 40, horizontal_align: int = 0) -> int:
-        """Attach cc.RichText. Supports <b>, <i>, <color=#FF0000>, <size=24>, <img> tags."""
+                           line_height: float = 40, horizontal_align: int = 0,
+                           size_preset: str | None = None) -> int:
+        """Attach cc.RichText. Supports <b>, <i>, <color=#FF0000>, <size=24>, <img> tags.
+
+        ``size_preset`` (``"title"``/``"heading"``/``"body"``/``"caption"``)
+        overrides font_size from the project's UI theme and sets
+        line_height to ~1.25× of it.
+        """
         return sb.add_richtext(scene_path, node_id, text, font_size, max_width,
-                               line_height, horizontal_align)
+                               line_height, horizontal_align,
+                               size_preset=size_preset)
 
     @mcp.tool()
     def cocos_add_sliced_sprite(scene_path: str, node_id: int,
