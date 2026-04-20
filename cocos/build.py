@@ -679,3 +679,43 @@ def set_physics_2d_config(project_path: str | Path,
         "settings_path": str(settings_path),
         "physics": physics,
     }
+
+
+def set_physics_3d_config(project_path: str | Path,
+                          gravity_x: float = 0, gravity_y: float = -10,
+                          gravity_z: float = 0,
+                          fixed_time_step: float = 1/60,
+                          max_sub_steps: int = 1,
+                          sleep_threshold: float = 0.1,
+                          allow_sleep: bool = True,
+                          auto_simulation: bool = True) -> dict:
+    """Configure 3D physics system in project settings.
+
+    Default gravity is (0, -10, 0) — metric units (m/s²) unlike the 2D
+    system's pixel units. Writes to ``settings/v2/packages/physics.json``
+    which the engine reads alongside the per-scene 2D physics block.
+
+    ``max_sub_steps`` caps the number of physics sub-steps per frame when
+    the frame takes longer than ``fixed_time_step`` — bump to 3-4 if you
+    see physics lag after a frame hitch.
+    """
+    p = Path(project_path).expanduser().resolve()
+    physics_path = p / "settings" / "v2" / "packages" / "physics.json"
+    physics_path.parent.mkdir(parents=True, exist_ok=True)
+    if physics_path.exists():
+        with open(physics_path) as f:
+            data = json.load(f)
+    else:
+        data = {}
+    data["gravity"] = {"x": gravity_x, "y": gravity_y, "z": gravity_z}
+    data["fixedTimeStep"] = fixed_time_step
+    data["maxSubSteps"] = max_sub_steps
+    data["sleepThreshold"] = sleep_threshold
+    data["allowSleep"] = allow_sleep
+    data["autoSimulation"] = auto_simulation
+    with open(physics_path, "w") as f:
+        json.dump(data, f, indent=2)
+    return {
+        "settings_path": str(physics_path),
+        "physics": data,
+    }

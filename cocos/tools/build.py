@@ -192,6 +192,25 @@ def register(mcp: FastMCP) -> None:
                                         fixed_time_step, velocity_iterations,
                                         position_iterations, allow_sleep)
 
+    @mcp.tool()
+    def cocos_set_physics_3d_config(project_path: str,
+                                    gravity_x: float = 0, gravity_y: float = -10,
+                                    gravity_z: float = 0,
+                                    fixed_time_step: float = 0.016667,
+                                    max_sub_steps: int = 1,
+                                    sleep_threshold: float = 0.1,
+                                    allow_sleep: bool = True,
+                                    auto_simulation: bool = True) -> dict:
+        """Configure 3D physics: gravity (m/s²), timestep, sub-step cap.
+
+        Default gravity is (0, -10, 0) in metric units (NOT pixels — 2D uses -320
+        because of its pixel coord system). Writes settings/v2/packages/physics.json.
+        Bump max_sub_steps to 3-4 if physics drops frames after hitches.
+        """
+        return cb.set_physics_3d_config(project_path, gravity_x, gravity_y, gravity_z,
+                                        fixed_time_step, max_sub_steps,
+                                        sleep_threshold, allow_sleep, auto_simulation)
+
     # ---------------- Engine module configuration ----------------
 
     @mcp.tool()

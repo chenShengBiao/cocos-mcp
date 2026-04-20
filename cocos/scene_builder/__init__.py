@@ -113,6 +113,25 @@ from .physics import (
     add_spring_joint2d,
     add_wheel_joint2d,
 )
+from .physics_3d import (
+    AXIS_X,
+    AXIS_Y,
+    AXIS_Z,
+    RIGIDBODY_DYNAMIC,
+    RIGIDBODY_KINEMATIC,
+    RIGIDBODY_STATIC,
+    add_box_character_controller,
+    add_box_collider_3d,
+    add_capsule_character_controller,
+    add_capsule_collider_3d,
+    add_cone_collider_3d,
+    add_cylinder_collider_3d,
+    add_mesh_collider_3d,
+    add_plane_collider_3d,
+    add_rigidbody_3d,
+    add_sphere_collider_3d,
+    add_terrain_collider_3d,
+)
 from .prefab import (
     _shift_id_refs,
     create_prefab,

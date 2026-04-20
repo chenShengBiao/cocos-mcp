@@ -2,13 +2,14 @@
 
 This was a single 1099-line module; split into submodules for maintainability:
 
-* ``installs``     — Creator install detection + ``init_project`` + ``find_creator``
-* ``assets``       — script / image / audio / resource file import + listing + project info
-* ``animation``    — ``create_animation_clip`` + internal track builders
-* ``skeletal``     — Spine + DragonBones data import
-* ``tiled``        — TiledMap (.tmx) import
-* ``atlas``        — SpriteAtlas (.pac) creation
-* ``gen_image``    — AI-generated asset import wrapper
+* ``installs``          — Creator install detection + ``init_project`` + ``find_creator``
+* ``assets``            — script / image / audio / resource file import + listing + project info
+* ``animation``         — ``create_animation_clip`` + internal track builders
+* ``skeletal``          — Spine + DragonBones data import
+* ``tiled``             — TiledMap (.tmx) import
+* ``atlas``             — SpriteAtlas (.pac) creation
+* ``gen_image``         — AI-generated asset import wrapper
+* ``physics_material``  — ``cc.PhysicsMaterial`` (.pmat) asset creation
 
 The public surface is re-exported here so ``from cocos import project as cp;
 cp.list_assets(...)`` continues to work verbatim — and so tests that patch
@@ -17,9 +18,7 @@ docstring for the late-binding trick that makes this work).
 """
 from __future__ import annotations
 
-from .animation import (
-    create_animation_clip,
-)
+from .animation import create_animation_clip
 from .assets import (
     add_audio_file,
     add_image,
@@ -38,6 +37,7 @@ from .installs import (
     invalidate_creator_installs_cache,
     list_creator_installs,
 )
+from .physics_material import create_physics_material
 from .skeletal import (
     add_dragonbones_data,
     add_spine_data,
@@ -54,6 +54,7 @@ __all__ = [
     "add_spine_data",
     "add_tiled_map_asset",
     "create_animation_clip",
+    "create_physics_material",
     "create_sprite_atlas",
     "find_creator",
     "generate_and_import_image",
