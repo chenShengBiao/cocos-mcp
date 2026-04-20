@@ -118,3 +118,75 @@ def register(mcp: FastMCP) -> None:
         """
         return sb.add_slide_in(scene_path, node_id, from_side, distance,
                                duration, delay, rel_dir)
+
+    @mcp.tool()
+    def cocos_add_scale_in(scene_path: str, node_id: int,
+                           from_scale: float = 0.0,
+                           duration: float = 0.3,
+                           delay: float = 0.0,
+                           rel_dir: str | None = None) -> dict:
+        """Pop a node in from ``from_scale`` to 1.0 at scene start.
+
+        ``from_scale=0`` → pop-in from nothing;
+        ``from_scale=0.5`` → grow from half-size.
+
+        Returns {clip_uuid, clip_path, anim_component_id}.
+        """
+        return sb.add_scale_in(scene_path, node_id, from_scale, duration,
+                               delay, rel_dir)
+
+    @mcp.tool()
+    def cocos_add_bounce_in(scene_path: str, node_id: int,
+                            overshoot: float = 1.15,
+                            duration: float = 0.5,
+                            delay: float = 0.0,
+                            rel_dir: str | None = None) -> dict:
+        """Entrance with a spring-like overshoot: 0 → overshoot → 1.0.
+
+        Tune ``overshoot`` 1.05-1.3 — below that the bounce is invisible,
+        above it reads as jittery. 0.5s duration is a good default for
+        most UI; halve for faster games.
+
+        Returns {clip_uuid, clip_path, anim_component_id}.
+        """
+        return sb.add_bounce_in(scene_path, node_id, overshoot, duration,
+                                delay, rel_dir)
+
+    @mcp.tool()
+    def cocos_add_pulse(scene_path: str, node_id: int,
+                        strength: float = 0.08,
+                        period: float = 1.2,
+                        rel_dir: str | None = None) -> dict:
+        """Looping subtle scale pulse — attention-grabber for idle UI.
+
+        ``strength``: how much bigger at peak (0.08 = 8%). Keep subtle;
+        above ~0.15 looks anxious.
+        ``period``: one cycle in seconds. 1.0-1.5 reads as a relaxed
+        heartbeat; below 0.5 feels panicked.
+
+        Clip loops forever — attach and forget.
+
+        Returns {clip_uuid, clip_path, anim_component_id}.
+        """
+        return sb.add_pulse(scene_path, node_id, strength, period, rel_dir)
+
+    @mcp.tool()
+    def cocos_add_shake(scene_path: str, node_id: int,
+                        intensity: float = 10.0,
+                        duration: float = 0.3,
+                        axis: str = "x",
+                        rel_dir: str | None = None) -> dict:
+        """One-shot position wobble — for damage / error / impact feedback.
+
+        ``axis``: "x" (horizontal hit / invalid-input), "y" (stomp),
+        "both" (explosion / big impact).
+        ``intensity`` is the peak amplitude in logical pixels;
+        oscillation decays linearly to 0 over ``duration``.
+
+        Animates around the node's CURRENT _lpos — position the node
+        first, then attach.
+
+        Returns {clip_uuid, clip_path, anim_component_id}.
+        """
+        return sb.add_shake(scene_path, node_id, intensity, duration, axis,
+                            rel_dir)

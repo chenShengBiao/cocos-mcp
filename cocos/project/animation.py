@@ -20,7 +20,8 @@ def create_animation_clip(project_path: str | Path, clip_name: str,
                           sample: int = 60,
                           tracks: list[dict] | None = None,
                           rel_dir: str | None = None,
-                          uuid: str | None = None) -> dict:
+                          uuid: str | None = None,
+                          wrap_mode: int = 1) -> dict:
     """Create a .anim AnimationClip file + meta.
 
     Args:
@@ -39,6 +40,17 @@ def create_animation_clip(project_path: str | Path, clip_name: str,
             }
             Values: position=[x,y,z], scale=[sx,sy,sz], rotation=[ez] (euler z degrees),
                     color=[r,g,b,a], opacity=0-255 (number), active=true/false
+        wrap_mode: cocos AnimationClip.WrapMode enum.
+            1=Normal (play once, default),
+            2=Reverse (play once in reverse),
+            4=Loop,
+            22=PingPong,
+            36=LoopReverse.
+            NOTE: the engine enum is non-contiguous — these aren't ordinals.
+            Prior releases of this tool hardcoded 2, which is Reverse (NOT
+            Loop as the old comment claimed); every prior clip was
+            effectively mis-wrapped. If you're upgrading and relied on
+            the old value, pass wrap_mode=2 explicitly.
 
     Returns {path, rel_path, uuid}.
     """
@@ -58,7 +70,7 @@ def create_animation_clip(project_path: str | Path, clip_name: str,
 
     # Build Cocos Creator 3.x AnimationClip JSON
     # Cocos 3.x .anim is a JSON with specific structure
-    anim_data = _build_anim_json(clip_name, duration, sample, tracks or [])
+    anim_data = _build_anim_json(clip_name, duration, sample, tracks or [], wrap_mode)
 
     with open(clip_path, "w") as f:
         json.dump(anim_data, f, indent=2)
@@ -82,7 +94,8 @@ def create_animation_clip(project_path: str | Path, clip_name: str,
     }
 
 
-def _build_anim_json(name: str, duration: float, sample: int, tracks: list[dict]) -> list:
+def _build_anim_json(name: str, duration: float, sample: int, tracks: list[dict],
+                     wrap_mode: int = 1) -> list:
     """Build a Cocos Creator 3.x AnimationClip serialized JSON.
 
     The .anim file is a JSON array (same format as .scene/.prefab).
@@ -102,7 +115,11 @@ def _build_anim_json(name: str, duration: float, sample: int, tracks: list[dict]
         "_native": "",
         "sample": sample,
         "speed": 1,
-        "wrapMode": 2,  # 2=Loop, 1=Normal, 0=Default
+        # Cocos WrapMode enum (non-contiguous): 0=Default 1=Normal 2=Reverse
+        # 4=Loop 22=PingPong 36=LoopReverse. Previously hardcoded 2, which
+        # is Reverse — that silently mis-wrapped every clip. Default is
+        # now Normal (play once) per animation.create_animation_clip.
+        "wrapMode": wrap_mode,
         "enableTrsBlending": False,
         "_duration": duration,
         "_hash": hash(name) & 0xFFFFFFFF,

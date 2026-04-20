@@ -107,7 +107,11 @@ from .modules import (
     audit_scene_modules,
 )
 from .animation_presets import (
+    add_bounce_in,
     add_fade_in,
+    add_pulse,
+    add_scale_in,
+    add_shake,
     add_slide_in,
 )
 from .ui_lint import lint_ui

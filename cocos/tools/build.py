@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mcp.server.fastmcp import Image
+
 from cocos import build as cb
 from cocos import project as cp
+from cocos import screenshot as sshot
 
 if TYPE_CHECKING:  # pragma: no cover
     from mcp.server.fastmcp import FastMCP
@@ -77,6 +80,37 @@ def register(mcp: FastMCP) -> None:
     def cocos_preview_status() -> dict:
         """List currently running preview servers."""
         return cb.preview_status()
+
+    @mcp.tool()
+    def cocos_screenshot_preview(url: str = "http://localhost:8080/",
+                                 viewport_width: int = 960,
+                                 viewport_height: int = 640,
+                                 wait_ms: int = 500,
+                                 full_page: bool = False,
+                                 timeout_ms: int = 15000) -> Image:
+        """Capture a PNG screenshot of a running preview URL via Playwright.
+
+        Closes the visual-feedback loop for AI clients — after
+        ``cocos_build`` + ``cocos_start_preview`` call this to see what
+        the browser actually rendered and iterate on UI with sight,
+        not guesswork.
+
+        ``wait_ms`` gives the page time to run scripts after
+        ``networkidle`` fires — Cocos's web build finishes asset
+        loading before the first frame draws, so the default 500ms
+        covers most scenes. Bump for heavy 3D scenes.
+
+        OPTIONAL DEPENDENCY: needs ``playwright`` + the chromium
+        browser binary. Install with::
+
+            uv pip install playwright
+            playwright install chromium
+
+        Returns the PNG as an MCP Image, shown inline in the chat.
+        """
+        png_bytes = sshot.screenshot_url(url, viewport_width, viewport_height,
+                                         wait_ms, full_page, timeout_ms)
+        return Image(data=png_bytes, format="png")
 
     # ---------------- Project settings: scene / resolution / platform ----------------
 
