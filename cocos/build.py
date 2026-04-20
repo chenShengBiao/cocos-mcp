@@ -67,7 +67,8 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
               skip_compress_texture: bool | None = None,
               inline_enum: bool | None = None,
               mangle_properties: bool | None = None,
-              build_options: dict[str, Any] | None = None) -> BuildResult:
+              build_options: dict[str, Any] | None = None,
+              apply_patches: bool = True) -> BuildResult:
     """Run `CocosCreator --project ... --build "platform=...;debug=...;...`.
 
     Convenience params expose the most-commonly-tweaked Cocos CLI flags:
@@ -163,6 +164,32 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
         for entry in sorted(build_dir.glob("*"))[:20]:
             artifacts.append(str(entry.relative_to(build_dir)))
 
+    # Post-build patches: auto-apply after a successful build so users don't
+    # lose edits to files Cocos regenerates. Runs before we assemble the
+    # result dict so patch info is part of the BuildResult handed back.
+    patch_report: dict | None = None
+    if success and apply_patches:
+        from .project.post_build_patches import apply_patches as _apply
+        try:
+            patch_report = _apply(project_path, platform, dry_run=False)
+            if not patch_report["ok"]:
+                # Patches failed mid-apply. The build artifacts are still
+                # valid — degrade to success=False with a clear error_code
+                # so the caller sees something broke.
+                success = False
+        except Exception as e:
+            # Defensive: never let a patch bug shadow a successful build as
+            # a crash. Report it, keep success=True, surface via log.
+            patch_report = {
+                "platform": platform,
+                "dry_run": False,
+                "build_dir": str(build_dir),
+                "applied": [],
+                "skipped": [],
+                "errors": [{"file": "<apply>", "message": str(e)}],
+                "ok": False,
+            }
+
     result: BuildResult = {
         "exit_code": exit_code,
         "success": success,
@@ -172,6 +199,8 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
         "build_dir": str(build_dir) if build_dir.exists() else None,
         "artifacts": artifacts,
     }
+    if patch_report is not None:
+        result["post_build_patches"] = patch_report
 
     # Structured error — give the LLM a recovery handle rather than a raw
     # log tail. `error_code` + `hint` are additive to `log_tail` so the
@@ -199,6 +228,20 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
             result["error_code"] = BUILD_FAILED
             result["hint"] = (f"generic build failure (exit_code={exit_code}); "
                               f"read log_tail or the full log at {log_path}")
+
+    # If the build itself passed but post-build patches broke, overwrite the
+    # (likely generic) error_code with a targeted one so the caller isn't
+    # sent to grep the Cocos log for a nonexistent problem.
+    if patch_report is not None and not patch_report["ok"]:
+        first_err = patch_report["errors"][0]
+        result["error_code"] = "POST_BUILD_PATCH_FAILED"
+        result["hint"] = (
+            f"post-build patch on {first_err['file']} failed: "
+            f"{first_err['message']}. Build artifacts are valid; "
+            "fix the patch (cocos_list_post_build_patches) or "
+            "re-run with apply_patches=False to skip."
+        )
+
     return result
 
 

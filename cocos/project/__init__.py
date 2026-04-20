@@ -38,6 +38,12 @@ from .installs import (
     list_creator_installs,
 )
 from .physics_material import create_physics_material
+from .post_build_patches import (
+    apply_patches as apply_post_build_patches,
+    list_patches as list_post_build_patches,
+    register_patches as register_post_build_patches,
+    remove_patches as remove_post_build_patches,
+)
 from .skeletal import (
     add_dragonbones_data,
     add_spine_data,
@@ -53,6 +59,7 @@ __all__ = [
     "add_script",
     "add_spine_data",
     "add_tiled_map_asset",
+    "apply_post_build_patches",
     "create_animation_clip",
     "create_physics_material",
     "create_sprite_atlas",
@@ -63,4 +70,7 @@ __all__ = [
     "invalidate_creator_installs_cache",
     "list_assets",
     "list_creator_installs",
+    "list_post_build_patches",
+    "register_post_build_patches",
+    "remove_post_build_patches",
 ]

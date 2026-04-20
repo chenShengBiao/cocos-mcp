@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from cocos import build as cb
+from cocos import project as cp
 
 if TYPE_CHECKING:  # pragma: no cover
     from mcp.server.fastmcp import FastMCP
@@ -20,7 +21,8 @@ def register(mcp: FastMCP) -> None:
                     skip_compress_texture: bool | None = None,
                     inline_enum: bool | None = None,
                     mangle_properties: bool | None = None,
-                    build_options: dict | None = None) -> dict:
+                    build_options: dict | None = None,
+                    apply_patches: bool = True) -> dict:
         """Headlessly build the project via `CocosCreator --build`.
 
         Common platforms:
@@ -37,9 +39,16 @@ def register(mcp: FastMCP) -> None:
         without an explicit param, use ``build_options={"flagName": value}``
         — explicit params still win on conflict.
 
+        After a successful build, automatically applies any patches
+        registered via ``cocos_register_post_build_patch`` to the output
+        directory — so edits to files Cocos regenerates (style.css,
+        project.config.json, etc.) survive every rebuild. Set
+        ``apply_patches=False`` to skip that step.
+
         Returns {exit_code, success, duration_sec, log_tail, build_dir, artifacts,
-        plus error_code/hint on failure}. First build is slow (~1-2 min);
-        subsequent builds with clean_temp=False are much faster.
+        plus error_code/hint on failure, post_build_patches dict when patches
+        ran}. First build is slow (~1-2 min); subsequent builds with
+        clean_temp=False are much faster.
         """
         return cb.cli_build(project_path, platform, debug, creator_version,
                             clean_temp=clean_temp,
@@ -47,7 +56,8 @@ def register(mcp: FastMCP) -> None:
                             skip_compress_texture=skip_compress_texture,
                             inline_enum=inline_enum,
                             mangle_properties=mangle_properties,
-                            build_options=build_options)
+                            build_options=build_options,
+                            apply_patches=apply_patches)
 
     @mcp.tool()
     def cocos_start_preview(project_path: str, platform: str = "web-mobile", port: int = 8080) -> dict:
@@ -254,3 +264,66 @@ def register(mcp: FastMCP) -> None:
     def cocos_get_engine_modules(project_path: str) -> dict:
         """List all engine modules and their enabled/disabled status."""
         return cb.get_engine_modules(project_path)
+
+    # ---------------- Post-build patches ----------------
+
+    @mcp.tool()
+    def cocos_register_post_build_patch(project_path: str, patches: list[dict],
+                                        mode: str = "append") -> dict:
+        """Register declarative patches that auto-apply after every successful build.
+
+        Use when a customization has no Cocos source-config switch and
+        would otherwise get wiped on the next ``cocos_build`` (classic
+        examples: ``style.css`` body background, ``project.config.json``
+        fields WeChat wants beyond what builder.json exposes, custom
+        ``index.html`` overrides).
+
+        Each patch dict needs:
+
+          ``platform``: str — "web-mobile" / "wechatgame" / "ios" / etc.
+          ``file``: str — path relative to ``build/<platform>/`` (no
+                     absolute paths, no '..' segments).
+          ``kind``: one of:
+             - ``"json_set"`` + ``path`` (dotted key) + ``value``
+             - ``"regex_sub"`` + ``find`` (regex) + ``replace`` (str)
+             - ``"copy_from"`` + ``source`` (project-relative path to src file)
+
+        ``mode``: ``"append"`` (default) adds to existing list, ``"replace"``
+        overwrites. To clear all patches, pass ``patches=[]`` with ``"replace"``.
+
+        All patches are validated at register time — invalid regex or
+        unsafe path fails here, not at build time.
+        """
+        return cp.register_post_build_patches(project_path, patches, mode)
+
+    @mcp.tool()
+    def cocos_list_post_build_patches(project_path: str) -> dict:
+        """Return all registered post-build patches with their indices."""
+        return cp.list_post_build_patches(project_path)
+
+    @mcp.tool()
+    def cocos_remove_post_build_patches(project_path: str,
+                                        indices: list[int] | None = None,
+                                        platform: str | None = None,
+                                        file: str | None = None) -> dict:
+        """Remove patches by index list OR by platform/file filter.
+
+        ``indices`` takes precedence; otherwise AND of platform+file filters.
+        Calling with all None is a no-op (explicit wipe requires
+        ``cocos_register_post_build_patch([], mode='replace')``).
+        """
+        return cp.remove_post_build_patches(project_path, indices, platform, file)
+
+    @mcp.tool()
+    def cocos_apply_post_build_patches(project_path: str, platform: str,
+                                       dry_run: bool = False) -> dict:
+        """Apply registered patches for ``platform`` to ``build/<platform>/``.
+
+        Normally ``cocos_build`` invokes this automatically on success —
+        call directly only for dry-run preview (``dry_run=True``) or when
+        you need to re-apply without rebuilding.
+
+        Returns {platform, dry_run, build_dir, applied, skipped, errors, ok}.
+        Stops on first patch error so a failure can't cascade across files.
+        """
+        return cp.apply_post_build_patches(project_path, platform, dry_run)

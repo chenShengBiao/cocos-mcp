@@ -47,6 +47,10 @@ class BuildResult(_BuildCommon, total=False):
     error: str
     timed_out: bool
     ts_errors: list[dict]
+    # Present whenever cli_build has a registered patch set for the target
+    # platform (or would have, even if empty). Shape:
+    # {platform, dry_run, build_dir, applied, skipped, errors, ok}
+    post_build_patches: dict
 
 
 class _PreviewStartCommon(TypedDict):
