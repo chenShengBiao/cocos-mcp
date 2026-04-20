@@ -106,7 +106,16 @@ from .modules import (
     COMPONENT_REQUIRES_MODULE,
     audit_scene_modules,
 )
+from .animation_presets import (
+    add_fade_in,
+    add_slide_in,
+)
 from .ui_lint import lint_ui
+from .ui_patterns import (
+    add_dialog_modal,
+    add_hud_bar,
+    add_main_menu,
+)
 from .physics import (
     _attach_joint,
     _make_joint2d_base,
