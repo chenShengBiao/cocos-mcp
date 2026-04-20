@@ -267,14 +267,20 @@ def add_wheel_joint2d(scene_path: str | Path, node_id: int,
     return _attach_joint(scene_path, node_id, obj)
 
 
-def add_weld_joint2d(scene_path: str | Path, node_id: int,
-                     connected_body_id: int | None = None,
-                     anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
-                     angle: float = 0.0,
-                     frequency: float = 5.0, damping_ratio: float = 0.7,
-                     collide_connected: bool = False) -> int:
-    """Attach cc.WeldJoint2D — rigidly fuses two bodies (breakable structures)."""
-    obj = _make_joint2d_base(node_id, "cc.WeldJoint2D", "wd2", connected_body_id, collide_connected)
+def add_fixed_joint_2d(scene_path: str | Path, node_id: int,
+                       connected_body_id: int | None = None,
+                       anchor: tuple = (0, 0), connected_anchor: tuple = (0, 0),
+                       angle: float = 0.0,
+                       frequency: float = 5.0, damping_ratio: float = 0.7,
+                       collide_connected: bool = False) -> int:
+    """Attach cc.FixedJoint2D — rigidly fuses two bodies (breakable structures).
+
+    Named "weld" in Box2D and in earlier releases of this library; Cocos 3.8's
+    class is ``cc.FixedJoint2D``. The previous ``add_weld_joint2d`` emitted
+    ``cc.WeldJoint2D`` which the 3.8 engine does not recognize, so scenes
+    built with it silently had no joint at runtime.
+    """
+    obj = _make_joint2d_base(node_id, "cc.FixedJoint2D", "fj2", connected_body_id, collide_connected)
     obj.update({
         "_anchor": _vec2(*anchor),
         "_connectedAnchor": _vec2(*connected_anchor),
@@ -305,19 +311,10 @@ def add_relative_joint2d(scene_path: str | Path, node_id: int,
     return _attach_joint(scene_path, node_id, obj)
 
 
-def add_motor_joint2d(scene_path: str | Path, node_id: int,
-                      connected_body_id: int | None = None,
-                      max_force: float = 1000.0, max_torque: float = 1000.0,
-                      correction_factor: float = 0.3,
-                      linear_offset: tuple = (0, 0), angular_offset: float = 0.0,
-                      collide_connected: bool = False) -> int:
-    """Attach cc.MotorJoint2D — drives one body to follow another's position+angle."""
-    obj = _make_joint2d_base(node_id, "cc.MotorJoint2D", "mt2", connected_body_id, collide_connected)
-    obj.update({
-        "_maxForce": max_force,
-        "_maxTorque": max_torque,
-        "_correctionFactor": correction_factor,
-        "_linearOffset": _vec2(*linear_offset),
-        "_angularOffset": angular_offset,
-    })
-    return _attach_joint(scene_path, node_id, obj)
+# cc.MotorJoint2D does not exist in Cocos Creator 3.8 (verified against
+# cocos-engine v3.8.6 sources: no motor-joint-2d.ts file in
+# cocos/physics-2d/framework/components/joints/). The previous
+# ``add_motor_joint2d`` tool emitted ``cc.MotorJoint2D`` which the runtime
+# ignores, producing silently broken scenes. Removed for 3.8 parity. If you
+# need a drive-to-target behavior, use ``add_relative_joint2d``, which
+# covers the same use case via _linearOffset + _angularOffset.

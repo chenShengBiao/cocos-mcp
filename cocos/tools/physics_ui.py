@@ -156,18 +156,22 @@ def register(mcp: FastMCP) -> None:
                                     frequency, damping_ratio, collide_connected)
 
     @mcp.tool()
-    def cocos_add_weld_joint2d(scene_path: str, node_id: int,
-                               connected_body_id: int | None = None,
-                               anchor_x: float = 0, anchor_y: float = 0,
-                               connected_anchor_x: float = 0, connected_anchor_y: float = 0,
-                               angle: float = 0.0,
-                               frequency: float = 5.0, damping_ratio: float = 0.7,
-                               collide_connected: bool = False) -> int:
-        """Attach cc.WeldJoint2D — rigidly fuses two bodies (breakable structures)."""
-        return sb.add_weld_joint2d(scene_path, node_id, connected_body_id,
-                                   (anchor_x, anchor_y),
-                                   (connected_anchor_x, connected_anchor_y),
-                                   angle, frequency, damping_ratio, collide_connected)
+    def cocos_add_fixed_joint_2d(scene_path: str, node_id: int,
+                                 connected_body_id: int | None = None,
+                                 anchor_x: float = 0, anchor_y: float = 0,
+                                 connected_anchor_x: float = 0, connected_anchor_y: float = 0,
+                                 angle: float = 0.0,
+                                 frequency: float = 5.0, damping_ratio: float = 0.7,
+                                 collide_connected: bool = False) -> int:
+        """Attach cc.FixedJoint2D — rigidly fuses two bodies (breakable structures).
+
+        Named "weld" in Box2D; replaces the prior ``cocos_add_weld_joint2d``
+        which emitted ``cc.WeldJoint2D`` (not a real 3.8 class).
+        """
+        return sb.add_fixed_joint_2d(scene_path, node_id, connected_body_id,
+                                     (anchor_x, anchor_y),
+                                     (connected_anchor_x, connected_anchor_y),
+                                     angle, frequency, damping_ratio, collide_connected)
 
     @mcp.tool()
     def cocos_add_relative_joint2d(scene_path: str, node_id: int,
@@ -178,26 +182,16 @@ def register(mcp: FastMCP) -> None:
                                    linear_offset_x: float = 0, linear_offset_y: float = 0,
                                    angular_offset: float = 0.0,
                                    collide_connected: bool = False) -> int:
-        """Attach cc.RelativeJoint2D — keeps relative position+angle ('attach to' effect)."""
+        """Attach cc.RelativeJoint2D — keeps relative position+angle ('attach to' effect).
+
+        Also covers the follow-target use case that the old ``cocos_add_motor_joint2d``
+        tried to solve; ``cc.MotorJoint2D`` does not exist in Cocos 3.8.
+        """
         return sb.add_relative_joint2d(scene_path, node_id, connected_body_id,
                                        max_force, max_torque, correction_factor,
                                        auto_calc_offset,
                                        (linear_offset_x, linear_offset_y),
                                        angular_offset, collide_connected)
-
-    @mcp.tool()
-    def cocos_add_motor_joint2d(scene_path: str, node_id: int,
-                                connected_body_id: int | None = None,
-                                max_force: float = 1000.0, max_torque: float = 1000.0,
-                                correction_factor: float = 0.3,
-                                linear_offset_x: float = 0, linear_offset_y: float = 0,
-                                angular_offset: float = 0.0,
-                                collide_connected: bool = False) -> int:
-        """Attach cc.MotorJoint2D — drives one body to follow another's position+angle."""
-        return sb.add_motor_joint2d(scene_path, node_id, connected_body_id,
-                                    max_force, max_torque, correction_factor,
-                                    (linear_offset_x, linear_offset_y),
-                                    angular_offset, collide_connected)
 
     # ---------------- UI components ----------------
 

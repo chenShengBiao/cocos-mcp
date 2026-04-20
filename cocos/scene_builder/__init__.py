@@ -103,15 +103,14 @@ from .physics import (
     add_box_collider2d,
     add_circle_collider2d,
     add_distance_joint2d,
+    add_fixed_joint_2d,
     add_hinge_joint2d,
-    add_motor_joint2d,
     add_mouse_joint2d,
     add_polygon_collider2d,
     add_relative_joint2d,
     add_rigidbody2d,
     add_slider_joint2d,
     add_spring_joint2d,
-    add_weld_joint2d,
     add_wheel_joint2d,
 )
 from .prefab import (

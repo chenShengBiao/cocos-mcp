@@ -153,9 +153,8 @@ def _scene_with_two_bodies() -> tuple[Path, int, int, int, int]:
     (sb.add_spring_joint2d, "cc.SpringJoint2D"),
     (sb.add_slider_joint2d, "cc.SliderJoint2D"),
     (sb.add_wheel_joint2d, "cc.WheelJoint2D"),
-    (sb.add_weld_joint2d, "cc.WeldJoint2D"),
+    (sb.add_fixed_joint_2d, "cc.FixedJoint2D"),
     (sb.add_relative_joint2d, "cc.RelativeJoint2D"),
-    (sb.add_motor_joint2d, "cc.MotorJoint2D"),
 ])
 def test_two_body_joints(adder, type_name):
     path, n1, _rb1, _n2, rb2 = _scene_with_two_bodies()
