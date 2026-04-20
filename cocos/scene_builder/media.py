@@ -18,10 +18,17 @@ from ._helpers import (
     _color,
     _load_scene,
     _rect,
+    _ref,
     _save_scene,
     _vec3,
     _vec4,
 )
+
+# FogType enum values — cocos/render-scene/scene/fog-info.ts
+FOG_LINEAR = 0
+FOG_EXP = 1
+FOG_EXP_SQUARED = 2
+FOG_LAYERED = 3
 
 
 # ----------- audio -----------
@@ -363,5 +370,86 @@ def set_shadows(scene_path: str | Path,
         info["_distance"] = distance
     if color is not None:
         info["_shadowColor"] = _color(*color)
+    _save_scene(scene_path, s)
+    return info
+
+
+def _make_fog_info() -> dict:
+    """Default cc.FogInfo — matches cocos-engine v3.8.6 field defaults."""
+    return {
+        "__type__": "cc.FogInfo",
+        "_type": FOG_LINEAR,
+        "_fogColor": _color(200, 200, 200, 255),  # #C8C8C8 in the engine
+        "_enabled": False,
+        "_fogDensity": 0.3,
+        "_fogStart": 0.5,
+        "_fogEnd": 300,
+        "_fogAtten": 5,
+        "_fogTop": 1.5,
+        "_fogRange": 1.2,
+        "_accurate": False,
+    }
+
+
+def set_fog(scene_path: str | Path,
+            enabled: bool | None = None,
+            fog_type: int | None = None,
+            color: tuple | None = None,
+            density: float | None = None,
+            start: float | None = None,
+            end: float | None = None,
+            atten: float | None = None,
+            top: float | None = None,
+            fog_range: float | None = None,
+            accurate: bool | None = None) -> dict:
+    """Set volumetric fog on the scene's cc.FogInfo. Lazy-creates one if
+    missing — ``create_empty_scene`` doesn't currently emit a FogInfo, so
+    scenes built via this library pre-fog-support need to have it injected
+    on first ``set_fog`` call.
+
+    ``fog_type``: 0=LINEAR (use start+end), 1=EXP (density), 2=EXP_SQUARED,
+    3=LAYERED (top+range). Module constants FOG_LINEAR/EXP/EXP_SQUARED/
+    LAYERED are also exported.
+
+    Returns the updated FogInfo dict.
+    """
+    s = _load_scene(scene_path)
+    idx = _find_global_info(s, "cc.FogInfo")
+    if idx is None:
+        # Lazy-create + link from SceneGlobals so the engine actually picks
+        # up the fog block at load time. We append at the end — all existing
+        # __id__ refs remain valid (they only reference earlier indices).
+        fog_obj = _make_fog_info()
+        s.append(fog_obj)
+        idx = len(s) - 1
+        globals_idx = _find_global_info(s, "cc.SceneGlobals")
+        if globals_idx is None:
+            raise ValueError(
+                "scene has no cc.SceneGlobals — was it created outside of "
+                "create_empty_scene? Cannot link cc.FogInfo without a globals host"
+            )
+        s[globals_idx]["fog"] = _ref(idx)
+
+    info = s[idx]
+    if enabled is not None:
+        info["_enabled"] = enabled
+    if fog_type is not None:
+        info["_type"] = fog_type
+    if color is not None:
+        info["_fogColor"] = _color(*color)
+    if density is not None:
+        info["_fogDensity"] = density
+    if start is not None:
+        info["_fogStart"] = start
+    if end is not None:
+        info["_fogEnd"] = end
+    if atten is not None:
+        info["_fogAtten"] = atten
+    if top is not None:
+        info["_fogTop"] = top
+    if fog_range is not None:
+        info["_fogRange"] = fog_range
+    if accurate is not None:
+        info["_accurate"] = accurate
     _save_scene(scene_path, s)
     return info

@@ -347,6 +347,37 @@ def register(mcp: FastMCP) -> None:
         return sb.set_shadows(scene_path, enabled=enabled, normal=normal,
                               distance=distance, color=color)
 
+    @mcp.tool()
+    def cocos_set_fog(scene_path: str,
+                      enabled: bool | None = None,
+                      fog_type: int | None = None,
+                      color_r: int | None = None, color_g: int | None = None,
+                      color_b: int | None = None, color_a: int | None = None,
+                      density: float | None = None,
+                      start: float | None = None,
+                      end: float | None = None,
+                      atten: float | None = None,
+                      top: float | None = None,
+                      fog_range: float | None = None,
+                      accurate: bool | None = None) -> dict:
+        """Configure volumetric fog on the scene's cc.FogInfo.
+
+        Fourth scene-global alongside ambient/skybox/shadows. Lazy-creates
+        a cc.FogInfo + links it from cc.SceneGlobals if the scene doesn't
+        have one yet (scenes built before this tool existed won't).
+
+        fog_type: 0=LINEAR (use start+end), 1=EXP (density), 2=EXP_SQUARED,
+        3=LAYERED (top+range). Atmospheric settings are inter-dependent —
+        LINEAR ignores density, EXP/EXP_SQUARED ignore start/end.
+        """
+        color = None
+        if any(c is not None for c in (color_r, color_g, color_b, color_a)):
+            color = (color_r or 200, color_g or 200, color_b or 200, color_a or 255)
+        return sb.set_fog(scene_path, enabled=enabled, fog_type=fog_type,
+                          color=color, density=density, start=start, end=end,
+                          atten=atten, top=top, fog_range=fog_range,
+                          accurate=accurate)
+
     # ---------------- Scene batch mode ----------------
 
     @mcp.tool()

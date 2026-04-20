@@ -291,6 +291,46 @@ def register(mcp: FastMCP) -> None:
         """Attach cc.ToggleContainer (radio group). Children are mutually exclusive."""
         return sb.add_toggle_container(scene_path, node_id, allow_switch_off)
 
+    @mcp.tool()
+    def cocos_add_scroll_bar(scene_path: str, node_id: int,
+                             handle_sprite_id: int | None = None,
+                             scroll_view_id: int | None = None,
+                             direction: int = 0,
+                             enable_auto_hide: bool = False,
+                             auto_hide_time: float = 1.0) -> int:
+        """Attach cc.ScrollBar — companion scroll indicator for a ScrollView.
+
+        direction: 0=HORIZONTAL (default), 1=VERTICAL.
+        Pass ``scroll_view_id`` + ``handle_sprite_id`` to wire both
+        references at attach time; otherwise set later via link_property.
+        """
+        return sb.add_scroll_bar(scene_path, node_id, handle_sprite_id,
+                                 scroll_view_id, direction, enable_auto_hide,
+                                 auto_hide_time)
+
+    @mcp.tool()
+    def cocos_add_page_view_indicator(scene_path: str, node_id: int,
+                                      sprite_frame_uuid: str | None = None,
+                                      direction: int = 0,
+                                      cell_width: float = 20,
+                                      cell_height: float = 20,
+                                      spacing: float = 5) -> int:
+        """Attach cc.PageViewIndicator — dots row that tracks PageView position.
+
+        Attach to a child of the PageView node. Engine auto-spawns one
+        indicator sprite per page using ``sprite_frame_uuid`` as template.
+        direction: 0=HORIZONTAL (default), 1=VERTICAL.
+        """
+        return sb.add_page_view_indicator(scene_path, node_id, sprite_frame_uuid,
+                                          direction, cell_width, cell_height,
+                                          spacing)
+
+    @mcp.tool()
+    def cocos_add_webview(scene_path: str, node_id: int,
+                          url: str = "https://cocos.com") -> int:
+        """Attach cc.WebView — embedded browser pane for ToS / activity pages."""
+        return sb.add_webview(scene_path, node_id, url)
+
     # ---------------- Event handler builders ----------------
 
     @mcp.tool()

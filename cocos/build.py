@@ -38,10 +38,42 @@ def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
     return False
 
 
+def _fmt_build_opt(value: Any) -> str:
+    """Encode a Python value for the ``--build "k=v;..."`` option string.
+
+    Cocos's CLI parses the string char-by-char; semicolons + equals-signs
+    are the hard separators, so we reject them in values outright (better
+    than silently producing garbage build flags). Booleans must be the
+    lowercase strings ``true`` / ``false``.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    s = str(value)
+    if ";" in s or "=" in s:
+        raise ValueError(
+            f"build option value {value!r} contains ';' or '=' which break "
+            "Cocos CLI parsing — remove them or pre-escape"
+        )
+    return s
+
+
 def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: bool = True,
               creator_version: str | None = None, timeout_sec: int = 600,
-              clean_temp: bool = True) -> BuildResult:
-    """Run `CocosCreator --project ... --build "platform=...;debug=..."`.
+              clean_temp: bool = True,
+              source_maps: bool | None = None,
+              md5_cache: bool | None = None,
+              skip_compress_texture: bool | None = None,
+              inline_enum: bool | None = None,
+              mangle_properties: bool | None = None,
+              build_options: dict[str, Any] | None = None) -> BuildResult:
+    """Run `CocosCreator --project ... --build "platform=...;debug=...;...`.
+
+    Convenience params expose the most-commonly-tweaked Cocos CLI flags:
+    ``source_maps``, ``md5_cache``, ``skip_compress_texture``, ``inline_enum``,
+    ``mangle_properties`` — all booleans; pass None to let the CLI default
+    apply. For anything else (e.g. ``splash.img``, per-platform flags),
+    pass the k=v pairs through ``build_options``. Convenience params win
+    over matching keys in ``build_options``.
 
     Returns:
       {
@@ -64,11 +96,31 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
         for sub in ("build", "temp"):
             shutil.rmtree(p / sub, ignore_errors=True)
 
+    # Build the --build flag's k=v;k=v string. ``build_options`` flows in
+    # first (lowest precedence); the explicit convenience params overwrite
+    # any same-named keys so "I said source_maps=True" always wins.
+    opts: dict[str, Any] = {"platform": platform, "debug": debug}
+    if build_options:
+        for k, v in build_options.items():
+            opts[k] = v
+    for k, v in (
+        ("platform", platform),
+        ("debug", debug),
+        ("sourceMaps", source_maps),
+        ("md5Cache", md5_cache),
+        ("skipCompressTexture", skip_compress_texture),
+        ("inlineEnum", inline_enum),
+        ("mangleProperties", mangle_properties),
+    ):
+        if v is not None:
+            opts[k] = v
+
+    build_flag = ";".join(f"{k}={_fmt_build_opt(v)}" for k, v in opts.items())
     log_path = _LOG_DIR / f"cocos-build-{p.name}.log"
     cmd = [
         cc_exe,
         "--project", str(p),
-        "--build", f"platform={platform};debug={'true' if debug else 'false'}",
+        "--build", build_flag,
     ]
 
     start = time.time()

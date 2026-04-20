@@ -83,6 +83,10 @@ from .batch import batch_ops
 # that each submodule can lazily ``from cocos.scene_builder import
 # add_component`` without a load-time cycle.
 from .media import (
+    FOG_EXP,
+    FOG_EXP_SQUARED,
+    FOG_LAYERED,
+    FOG_LINEAR,
     _find_global_info,
     add_animation,
     add_audio_source,
@@ -94,6 +98,7 @@ from .media import (
     add_tiled_map,
     add_video_player,
     set_ambient,
+    set_fog,
     set_shadows,
     set_skybox,
 )
@@ -158,6 +163,10 @@ from .prefab import (
     instantiate_prefab,
 )
 from .ui import (
+    PAGE_INDICATOR_HORIZONTAL,
+    PAGE_INDICATOR_VERTICAL,
+    SCROLLBAR_HORIZONTAL,
+    SCROLLBAR_VERTICAL,
     _serialize_events,
     add_block_input_events,
     add_button,
@@ -167,9 +176,11 @@ from .ui import (
     add_mask,
     add_motion_streak,
     add_page_view,
+    add_page_view_indicator,
     add_progress_bar,
     add_richtext,
     add_safe_area,
+    add_scroll_bar,
     add_scroll_view,
     add_slider,
     add_sliced_sprite,
@@ -177,6 +188,7 @@ from .ui import (
     add_toggle,
     add_toggle_container,
     add_ui_opacity,
+    add_webview,
     make_click_event,
     make_event_handler,
 )

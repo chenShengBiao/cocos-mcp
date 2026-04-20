@@ -14,17 +14,40 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def cocos_build(project_path: str, platform: str = "web-mobile", debug: bool = True,
-                    creator_version: str | None = None, clean_temp: bool = True) -> dict:
+                    creator_version: str | None = None, clean_temp: bool = True,
+                    source_maps: bool | None = None,
+                    md5_cache: bool | None = None,
+                    skip_compress_texture: bool | None = None,
+                    inline_enum: bool | None = None,
+                    mangle_properties: bool | None = None,
+                    build_options: dict | None = None) -> dict:
         """Headlessly build the project via `CocosCreator --build`.
 
         Common platforms:
           web-mobile, web-desktop, wechatgame, ios, android, mac, windows
 
-        Returns {exit_code, success, duration_sec, log_tail, build_dir, artifacts}.
-        First build is slow (~1-2 min — engine compile, asset import).
-        Subsequent builds with `clean_temp=False` can be much faster.
+        Convenience booleans for the most-tweaked release flags:
+          - source_maps: emit .map files for stack-trace symbolication
+          - md5_cache: append md5 hashes to asset filenames (cache busting)
+          - skip_compress_texture: skip texture compression (faster iteration)
+          - inline_enum: inline enum members to integer literals (smaller JS)
+          - mangle_properties: minify property names (breaks reflection APIs)
+
+        Pass None on any boolean to let Cocos's own default apply. For flags
+        without an explicit param, use ``build_options={"flagName": value}``
+        — explicit params still win on conflict.
+
+        Returns {exit_code, success, duration_sec, log_tail, build_dir, artifacts,
+        plus error_code/hint on failure}. First build is slow (~1-2 min);
+        subsequent builds with clean_temp=False are much faster.
         """
-        return cb.cli_build(project_path, platform, debug, creator_version, clean_temp=clean_temp)
+        return cb.cli_build(project_path, platform, debug, creator_version,
+                            clean_temp=clean_temp,
+                            source_maps=source_maps, md5_cache=md5_cache,
+                            skip_compress_texture=skip_compress_texture,
+                            inline_enum=inline_enum,
+                            mangle_properties=mangle_properties,
+                            build_options=build_options)
 
     @mcp.tool()
     def cocos_start_preview(project_path: str, platform: str = "web-mobile", port: int = 8080) -> dict:

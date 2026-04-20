@@ -448,3 +448,84 @@ def add_motion_streak(scene_path: str | Path, node_id: int,
         "_color": _color(*color),
         "_fastMode": fast_mode,
     })
+
+
+# ----------- WebView -----------
+
+def add_webview(scene_path: str | Path, node_id: int,
+                url: str = "https://cocos.com") -> int:
+    """Attach cc.WebView — embedded browser pane.
+
+    Useful for in-game ToS pages, activity pages, and web-based ad networks.
+    Default URL matches the engine's own default. The engine's serialized
+    shape is intentionally sparse — field count will grow as more platforms
+    gain WebView features; for now only _url + empty events list.
+    """
+    from cocos.scene_builder import add_component
+    return add_component(scene_path, node_id, "cc.WebView", {
+        "_url": url,
+        "webviewEvents": [],
+    })
+
+
+# ----------- ScrollBar -----------
+
+SCROLLBAR_HORIZONTAL = 0
+SCROLLBAR_VERTICAL = 1
+
+
+def add_scroll_bar(scene_path: str | Path, node_id: int,
+                   handle_sprite_id: int | None = None,
+                   scroll_view_id: int | None = None,
+                   direction: int = SCROLLBAR_HORIZONTAL,
+                   enable_auto_hide: bool = False,
+                   auto_hide_time: float = 1.0) -> int:
+    """Attach cc.ScrollBar — companion to cc.ScrollView (scroll indicator).
+
+    ``handle_sprite_id``: node/component id of the cc.Sprite that renders
+    the bar's draggable handle.
+    ``scroll_view_id``: id of the cc.ScrollView this bar controls (needed
+    so the bar stays in sync with scroll position).
+    ``direction``: 0=HORIZONTAL (default), 1=VERTICAL.
+    """
+    from cocos.scene_builder import add_component
+    props: dict[str, Any] = {
+        "_direction": direction,
+        "_enableAutoHide": enable_auto_hide,
+        "_autoHideTime": auto_hide_time,
+    }
+    if handle_sprite_id is not None:
+        props["_handle"] = _ref(handle_sprite_id)
+    if scroll_view_id is not None:
+        props["_scrollView"] = _ref(scroll_view_id)
+    return add_component(scene_path, node_id, "cc.ScrollBar", props)
+
+
+# ----------- PageViewIndicator -----------
+
+PAGE_INDICATOR_HORIZONTAL = 0
+PAGE_INDICATOR_VERTICAL = 1
+
+
+def add_page_view_indicator(scene_path: str | Path, node_id: int,
+                            sprite_frame_uuid: str | None = None,
+                            direction: int = PAGE_INDICATOR_HORIZONTAL,
+                            cell_width: float = 20,
+                            cell_height: float = 20,
+                            spacing: float = 5) -> int:
+    """Attach cc.PageViewIndicator — dots row showing current PageView page.
+
+    Attach to a child node of the PageView. The engine auto-generates one
+    indicator sprite per page using ``sprite_frame_uuid`` as the template.
+    ``cell_width``/``cell_height`` define each indicator's size;
+    ``spacing`` is the gap between them.
+    """
+    from cocos.scene_builder import add_component
+    props: dict[str, Any] = {
+        "_direction": direction,
+        "_cellSize": {"__type__": "cc.Size", "width": cell_width, "height": cell_height},
+        "spacing": spacing,
+    }
+    if sprite_frame_uuid:
+        props["_spriteFrame"] = {"__uuid__": sprite_frame_uuid, "__expectedType__": "cc.SpriteFrame"}
+    return add_component(scene_path, node_id, "cc.PageViewIndicator", props)
