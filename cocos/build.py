@@ -10,8 +10,15 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
+from .errors import (
+    BUILD_FAILED,
+    BUILD_TIMEOUT,
+    classify_build_log,
+)
 from .project import find_creator
+from .types import BuildResult, PreviewStartResult, PreviewStatusResult, PreviewStopResult
 
 # track running preview servers: {port: (subprocess.Popen, build_dir)}
 _preview_servers: dict[int, tuple] = {}
@@ -33,7 +40,7 @@ def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
 
 def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: bool = True,
               creator_version: str | None = None, timeout_sec: int = 600,
-              clean_temp: bool = True) -> dict:
+              clean_temp: bool = True) -> BuildResult:
     """Run `CocosCreator --project ... --build "platform=...;debug=..."`.
 
     Returns:
@@ -65,12 +72,17 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
     ]
 
     start = time.time()
+    timed_out = False
     with open(log_path, "w") as f:
         try:
             proc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, timeout=timeout_sec)
             exit_code = proc.returncode
         except subprocess.TimeoutExpired:
+            # subprocess.run already SIGKILLs the child on timeout, but we
+            # lose the returncode — surface the timeout explicitly so the
+            # caller doesn't confuse it with exit_code=-1 from a real crash.
             exit_code = -1
+            timed_out = True
     duration = time.time() - start
 
     # Read tail of log
@@ -87,7 +99,8 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
     #    0 = also reported success in some shell wrappers
     build_dir = p / "build" / platform
     success = (
-        exit_code in (0, 36)
+        not timed_out
+        and exit_code in (0, 36)
         and build_dir.exists()
         and any(build_dir.iterdir())
     )
@@ -96,7 +109,7 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
         for entry in sorted(build_dir.glob("*"))[:20]:
             artifacts.append(str(entry.relative_to(build_dir)))
 
-    return {
+    result: BuildResult = {
         "exit_code": exit_code,
         "success": success,
         "duration_sec": round(duration, 2),
@@ -106,8 +119,29 @@ def cli_build(project_path: str | Path, platform: str = "web-mobile", debug: boo
         "artifacts": artifacts,
     }
 
+    # Structured error — give the LLM a recovery handle rather than a raw
+    # log tail. `error_code` + `hint` are additive to `log_tail` so the
+    # caller can still read the full log when a classifier misses.
+    if timed_out:
+        result["timed_out"] = True
+        result["error_code"] = BUILD_TIMEOUT
+        result["error"] = f"build killed after {timeout_sec}s timeout"
+        result["hint"] = (f"raise timeout_sec above {timeout_sec} or inspect {log_path} "
+                          "for where the build hung")
+    elif not success:
+        classified = classify_build_log(log_tail)
+        if classified is not None:
+            code, hint = classified
+            result["error_code"] = code
+            result["hint"] = hint
+        else:
+            result["error_code"] = BUILD_FAILED
+            result["hint"] = (f"generic build failure (exit_code={exit_code}); "
+                              f"read log_tail or the full log at {log_path}")
+    return result
 
-def start_preview(project_path: str | Path, platform: str = "web-mobile", port: int = 8080) -> dict:
+
+def start_preview(project_path: str | Path, platform: str = "web-mobile", port: int = 8080) -> PreviewStartResult:
     """Serve build/<platform>/ over HTTP via a detached subprocess.
 
     Spawns ``python -m http.server`` (using the current interpreter, so this
@@ -169,7 +203,7 @@ def start_preview(project_path: str | Path, platform: str = "web-mobile", port: 
     }
 
 
-def stop_preview(port: int = 8080) -> dict:
+def stop_preview(port: int = 8080) -> PreviewStopResult:
     """Stop a preview started by start_preview.
 
     Only stops servers tracked in ``_preview_servers``. We deliberately do
@@ -195,7 +229,7 @@ def stop_preview(port: int = 8080) -> dict:
                     "kill it manually"}
 
 
-def preview_status() -> dict:
+def preview_status() -> PreviewStatusResult:
     return {
         "running": [
             {"port": port, "pid": v[0].pid, "serving": v[1]}

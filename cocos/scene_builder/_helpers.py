@@ -341,9 +341,70 @@ def _make_shadows_info() -> dict:
 
 # ----------- read / write -----------
 
+# Session-level scene cache. Key = resolved absolute path (str).
+# Value = (mtime_ns, parsed_list). Skipped when we can't stat the file.
+#
+# Invariant: cache entry always reflects what's on disk at the stored mtime.
+# Maintained by:
+#   * _load_scene: cache miss → parse, cache; cache hit → return shared ref
+#   * _save_scene: always update cache after successful write
+# External edits (e.g. Cocos editor saving) change mtime → cache naturally misses.
+#
+# Mutating the returned list WITHOUT calling _save_scene afterwards will
+# desync the cache. Every current tool that mutates also saves, so this
+# holds; new tools following the load-mutate-save pattern are automatically
+# safe. Call invalidate_scene_cache() in tests that need a clean slate.
+_SCENE_CACHE: dict[str, tuple[int, list]] = {}
+_SCENE_CACHE_MAX = 8
+
+
+def _mtime_ns(path: str) -> int | None:
+    try:
+        # Nanosecond mtime so two writes in the same second are distinguishable
+        # on filesystems that support it (APFS, ext4). Falls back gracefully
+        # on FS that only report second resolution — the value is still
+        # monotonic per write.
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
+def _cache_put(path_str: str, mtime: int, scene: list) -> None:
+    # LRU-ish: drop the oldest entry if we'd exceed the size cap. Python
+    # dicts preserve insertion order (3.7+), so the first key is "oldest".
+    if path_str in _SCENE_CACHE:
+        del _SCENE_CACHE[path_str]  # move-to-end on re-insert
+    elif len(_SCENE_CACHE) >= _SCENE_CACHE_MAX:
+        oldest = next(iter(_SCENE_CACHE))
+        del _SCENE_CACHE[oldest]
+    _SCENE_CACHE[path_str] = (mtime, scene)
+
+
+def invalidate_scene_cache(scene_path: str | Path | None = None) -> None:
+    """Drop cached scenes. Pass a path to invalidate one; pass None to clear all.
+
+    Call this after modifying a scene file outside of ``_save_scene`` (e.g.
+    the Cocos editor saves it, a git checkout replaces it).
+    """
+    if scene_path is None:
+        _SCENE_CACHE.clear()
+        return
+    key = str(Path(scene_path).resolve())
+    _SCENE_CACHE.pop(key, None)
+
+
 def _load_scene(scene_path: str | Path) -> list:
+    path_str = str(Path(scene_path).resolve())
+    mtime = _mtime_ns(path_str)
+    if mtime is not None:
+        hit = _SCENE_CACHE.get(path_str)
+        if hit is not None and hit[0] == mtime:
+            return hit[1]
     with open(scene_path) as f:
-        return json.load(f)
+        data = json.load(f)
+    if mtime is not None:
+        _cache_put(path_str, mtime, data)
+    return data
 
 
 def _save_scene(scene_path: str | Path, scene: list) -> None:
@@ -352,6 +413,12 @@ def _save_scene(scene_path: str | Path, scene: list) -> None:
             json.dump(scene, f, separators=(",", ":"))
         else:
             json.dump(scene, f, indent=2)
+    # Update cache so the next _load_scene hits instead of re-parsing the
+    # file we just wrote. getmtime is read AFTER the write completes.
+    path_str = str(Path(scene_path).resolve())
+    mtime = _mtime_ns(path_str)
+    if mtime is not None:
+        _cache_put(path_str, mtime, scene)
 
 
 # ----------- attachment helpers (UI-render auto-attach) -----------

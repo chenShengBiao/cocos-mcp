@@ -133,3 +133,76 @@ def test_cli_build_marks_failure_when_no_artifacts(tmp_path: Path, monkeypatch):
     res = cb.cli_build(str(proj), clean_temp=False)
     assert res["exit_code"] == 34
     assert res["success"] is False
+    # Generic build failure gets a BUILD_FAILED code + a hint pointing at the log.
+    assert res["error_code"] == "BUILD_FAILED"
+    assert "log" in res["hint"].lower()
+
+
+def test_cli_build_classifies_typescript_error(tmp_path: Path, monkeypatch):
+    """When log_tail contains a TS compile signature, the result should carry
+    BUILD_TYPESCRIPT_ERROR + a hint that tells the LLM to fix the .ts file."""
+    proj = _make_project_skeleton(tmp_path / "p")
+    monkeypatch.setattr(cb, "find_creator", lambda v=None: {
+        "exe": "/fake/cc", "version": "3.8.6", "template_dir": "/fake/t",
+    })
+
+    # Seed the log file that cli_build tails. Note: cli_build writes its
+    # log BEFORE reading it back, so we have to patch subprocess.run to
+    # leave a log behind.
+    fake_log_body = (
+        "Starting build...\n"
+        "src/Player.ts:12:5 - error TS2322: Type 'string' is not assignable to 'number'.\n"
+        "Build failed.\n"
+    )
+
+    class _FakeProc:
+        returncode = 34
+
+    def _fake_run(cmd, stdout=None, stderr=None, timeout=None):
+        if stdout is not None:
+            stdout.write(fake_log_body)
+            stdout.flush()
+        return _FakeProc()
+
+    monkeypatch.setattr(cb.subprocess, "run", _fake_run)
+    res = cb.cli_build(str(proj), clean_temp=False)
+    assert res["success"] is False
+    assert res["error_code"] == "BUILD_TYPESCRIPT_ERROR"
+    assert "cocos_add_script" in res["hint"]
+
+
+def test_cli_build_classifies_missing_module(tmp_path: Path, monkeypatch):
+    proj = _make_project_skeleton(tmp_path / "p")
+    monkeypatch.setattr(cb, "find_creator", lambda v=None: {
+        "exe": "/fake/cc", "version": "3.8.6", "template_dir": "/fake/t",
+    })
+
+    class _FakeProc:
+        returncode = 34
+
+    def _fake_run(cmd, stdout=None, stderr=None, timeout=None):
+        if stdout is not None:
+            stdout.write("Error: Cannot find module './UIHelper'\n")
+            stdout.flush()
+        return _FakeProc()
+
+    monkeypatch.setattr(cb.subprocess, "run", _fake_run)
+    res = cb.cli_build(str(proj), clean_temp=False)
+    assert res["error_code"] == "BUILD_MISSING_MODULE"
+
+
+def test_cli_build_timeout_sets_timeout_code(tmp_path: Path, monkeypatch):
+    proj = _make_project_skeleton(tmp_path / "p")
+    monkeypatch.setattr(cb, "find_creator", lambda v=None: {
+        "exe": "/fake/cc", "version": "3.8.6", "template_dir": "/fake/t",
+    })
+
+    def _fake_run(cmd, stdout=None, stderr=None, timeout=None):
+        raise cb.subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+    monkeypatch.setattr(cb.subprocess, "run", _fake_run)
+    res = cb.cli_build(str(proj), clean_temp=False, timeout_sec=5)
+    assert res["success"] is False
+    assert res["timed_out"] is True
+    assert res["error_code"] == "BUILD_TIMEOUT"
+    assert "timeout_sec" in res["hint"]

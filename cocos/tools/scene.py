@@ -351,11 +351,19 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def cocos_batch_scene_ops(scene_path: str, operations: list[dict]) -> dict:
-        """Execute multiple scene operations in a single file read/write cycle.
+        """PREFERRED for ≥3 sequential mutations on the same scene.
 
-        ~80x faster than calling individual cocos_add_* tools when building
-        more than a handful of nodes/components on the same scene; the file
-        is parsed once, mutated in memory, and serialized once at the end.
+        Execute multiple scene operations in a single file read/write cycle.
+        ~80× faster than calling individual ``cocos_add_*`` / ``cocos_set_*``
+        tools when building more than a handful of nodes/components on the
+        same scene; the file is parsed once, mutated in memory, and
+        serialized once at the end.
+
+        Rule of thumb: if you would otherwise call ``cocos_add_*``,
+        ``cocos_attach_*``, ``cocos_set_*``, or ``cocos_link_*`` three or
+        more times in a row on the same scene, use this tool instead. Pass
+        all the ops in one call; use ``"$N"`` back-references for ids that
+        earlier ops produced.
 
         Each operation is a dict with an 'op' key and operation-specific
         params. Returns {object_count, ops_executed, results: [...]}.

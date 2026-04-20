@@ -201,3 +201,71 @@ def test_env_file_ignores_comments_and_blanks(tmp_path: Path):
     f.write_text("# comment\n\nKEY=value\n   # indented comment\n")
     env = _load_env_file(f)
     assert env == {"KEY": "value"}
+
+
+# ----------- scene read cache -----------
+
+def test_scene_cache_skips_reparse_on_same_mtime(tmp_path: Path, monkeypatch):
+    """After save, a subsequent load should hit the cache and skip json.load."""
+    from cocos.scene_builder import _helpers as h
+
+    h.invalidate_scene_cache()
+    path = tmp_path / "cached.scene"
+    sb.create_empty_scene(path)
+
+    # First load populates cache; second load under the same mtime should
+    # return the SAME list object (shared ref = cache hit).
+    first = h._load_scene(path)
+    second = h._load_scene(path)
+    assert second is first, "expected cache hit to return the shared ref"
+
+    # Counter proof: spying on json.load should not see a second read.
+    calls = []
+    real_load = json.load
+    def spy_load(fp, *a, **kw):
+        calls.append(True)
+        return real_load(fp, *a, **kw)
+    monkeypatch.setattr(json, "load", spy_load)
+    h._load_scene(path)
+    assert calls == [], f"expected 0 json.load calls, got {len(calls)}"
+
+
+def test_scene_cache_invalidated_on_external_write(tmp_path: Path):
+    """If an external writer bumps mtime, the cache must re-read."""
+    from cocos.scene_builder import _helpers as h
+    import os, time
+
+    h.invalidate_scene_cache()
+    path = tmp_path / "external.scene"
+    sb.create_empty_scene(path)
+    first = h._load_scene(path)
+
+    # Simulate an external edit: overwrite with a truncated but valid scene
+    # JSON and bump mtime forward enough to distinguish even on coarse FS.
+    time.sleep(0.01)
+    with open(path, "w") as f:
+        json.dump([{"__type__": "cc.SceneAsset"}], f)
+    os.utime(path, ns=(os.stat(path).st_atime_ns,
+                       os.stat(path).st_mtime_ns + 1_000_000))
+
+    second = h._load_scene(path)
+    assert second is not first
+    assert len(second) == 1 and second[0]["__type__"] == "cc.SceneAsset"
+
+
+def test_scene_cache_evicts_oldest_past_size_cap(tmp_path: Path):
+    """Cache should cap at _SCENE_CACHE_MAX entries; oldest gets evicted."""
+    from cocos.scene_builder import _helpers as h
+
+    h.invalidate_scene_cache()
+    paths = [tmp_path / f"s{i}.scene" for i in range(h._SCENE_CACHE_MAX + 2)]
+    for p in paths:
+        sb.create_empty_scene(p)
+        h._load_scene(p)
+
+    assert len(h._SCENE_CACHE) == h._SCENE_CACHE_MAX
+    # First two paths should have been evicted
+    assert str(paths[0].resolve()) not in h._SCENE_CACHE
+    assert str(paths[1].resolve()) not in h._SCENE_CACHE
+    # Most recent should still be present
+    assert str(paths[-1].resolve()) in h._SCENE_CACHE

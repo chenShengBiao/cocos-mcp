@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..meta_util import prefab_meta, scene_meta
+from ..types import BatchOpsResult, SceneCreateResult, ValidationResult
 from ..uuid_util import new_uuid
 from ._helpers import (
     LAYER_DEFAULT,
@@ -50,16 +51,17 @@ from ._helpers import (
     _vec3,
     _vec4,
     _wrap_props,
+    invalidate_scene_cache,
 )
 from .batch import batch_ops  # re-exported as sb.batch_ops
 
-__all__ = ["batch_ops"]  # extended below as we go; for now just batch
+__all__ = ["batch_ops", "invalidate_scene_cache"]  # extended below as we go
 
 # ----------- public API -----------
 
 def create_empty_scene(scene_path: str | Path, scene_uuid: str | None = None,
                        canvas_width: int = 960, canvas_height: int = 640,
-                       clear_color: tuple = (135, 206, 235, 255)) -> dict:
+                       clear_color: tuple = (135, 206, 235, 255)) -> SceneCreateResult:
     """Create a minimal empty 2D scene with Canvas + UICamera + SceneGlobals.
 
     Returns a dict with the canonical node/component ids the caller needs:
@@ -337,7 +339,7 @@ def list_nodes(scene_path: str | Path) -> list[dict]:
     return out
 
 
-def validate_scene(scene_path: str | Path) -> dict:
+def validate_scene(scene_path: str | Path) -> ValidationResult:
     """Sanity-check a scene file: ref ranges, type tags, parent linkage,
     Canvas-Camera binding, and UI node ancestry."""
     s = _load_scene(scene_path)

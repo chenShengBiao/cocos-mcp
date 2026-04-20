@@ -1,6 +1,7 @@
 """Cocos Creator project management — install detection, init, asset add."""
 from __future__ import annotations
 
+import functools
 import json
 import shutil
 from collections.abc import Sequence
@@ -18,11 +19,11 @@ INSTALL_ROOTS = {
 }
 
 
-def list_creator_installs() -> list[dict]:
-    """Return all locally installed Cocos Creator versions."""
+@functools.lru_cache(maxsize=1)
+def _list_creator_installs_cached() -> tuple[dict, ...]:
     import sys
     roots = INSTALL_ROOTS.get(sys.platform, [Path("/Applications/Cocos/Creator")])
-    out = []
+    out: list[dict] = []
     for root in roots:
         if not root.exists():
             continue
@@ -45,18 +46,45 @@ def list_creator_installs() -> list[dict]:
                     "exe": str(exe),
                     "template_dir": str(template_dir) if template_dir.exists() else None,
                 })
-    return out
+    return tuple(out)
+
+
+def list_creator_installs() -> list[dict]:
+    """Return all locally installed Cocos Creator versions.
+
+    Results are cached for the lifetime of this process — Creator installs
+    rarely change mid-session, and probing the filesystem every call wastes
+    time on the init path (``find_creator`` → ``init_project``/``cli_build``).
+    Call ``invalidate_creator_installs_cache()`` if an install was added/
+    removed and you need fresh data.
+    """
+    return [dict(i) for i in _list_creator_installs_cached()]
+
+
+def invalidate_creator_installs_cache() -> None:
+    """Drop the cached Creator install list (e.g. after a new install)."""
+    _list_creator_installs_cached.cache_clear()
 
 
 def find_creator(version_prefix: str | None = None) -> dict:
     """Find a specific or the latest installed Creator."""
     installs = list_creator_installs()
     if not installs:
-        raise RuntimeError("no Cocos Creator install found locally")
+        raise RuntimeError(
+            "no Cocos Creator install found locally — install from "
+            "https://www.cocos.com/creator-download, then call "
+            "cocos_list_creator_installs to verify before retrying"
+        )
     if version_prefix:
-        installs = [i for i in installs if i["version"].startswith(version_prefix)]
-        if not installs:
-            raise RuntimeError(f"no Creator install matching {version_prefix!r}")
+        matching = [i for i in installs if i["version"].startswith(version_prefix)]
+        if not matching:
+            available = ", ".join(sorted({i["version"] for i in installs}))
+            raise RuntimeError(
+                f"no Creator install matching {version_prefix!r}. "
+                f"Available: {available or '(none)'}. "
+                f"Omit version_prefix to use the highest installed version."
+            )
+        installs = matching
     # Sort by version (string compare works for x.y.z forms)
     installs.sort(key=lambda i: i["version"], reverse=True)
     return installs[0]
@@ -147,9 +175,27 @@ def get_project_info(project_path: str | Path) -> dict:
     info["assets_exists"] = (p / "assets").exists()
     info["library_built"] = (p / "library").exists()
     info["build_dir"] = str(p / "build") if (p / "build").exists() else None
-    info["scenes"] = [str(s.relative_to(p)) for s in p.glob("assets/**/*.scene")]
-    info["scripts"] = [str(s.relative_to(p)) for s in p.glob("assets/**/*.ts")]
-    info["images"] = [str(s.relative_to(p)) for s in p.glob("assets/**/*.png")]
+
+    # Single walk of assets/, dispatching by suffix — avoids three separate
+    # rglob scans of the same tree (noticeable on projects with many files).
+    scenes: list[str] = []
+    scripts: list[str] = []
+    images: list[str] = []
+    assets_dir = p / "assets"
+    if assets_dir.exists():
+        for f in assets_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            suffix = f.suffix.lower()
+            if suffix == ".scene":
+                scenes.append(str(f.relative_to(p)))
+            elif suffix == ".ts":
+                scripts.append(str(f.relative_to(p)))
+            elif suffix == ".png":
+                images.append(str(f.relative_to(p)))
+    info["scenes"] = scenes
+    info["scripts"] = scripts
+    info["images"] = images
     return info
 
 
@@ -221,54 +267,62 @@ def list_assets(project_path: str | Path) -> dict:
     """List all assets and their UUIDs."""
     p = Path(project_path).expanduser().resolve()
     assets: dict[str, list[dict]] = {"scripts": [], "scenes": [], "images": [], "prefabs": []}
+    assets_dir = p / "assets"
+    if not assets_dir.exists():
+        return assets
 
-    def _read_uuid(meta_path: Path):
+    def _read_meta(meta_path: Path) -> dict | None:
         # Narrow exception list: only swallow file/JSON corruption, not
         # programming bugs (KeyError on a typo, TypeError, etc.) which
         # should still surface during development.
         try:
             with open(meta_path) as f:
-                return json.load(f).get("uuid")
+                return json.load(f)
         except (OSError, json.JSONDecodeError):
             return None
 
-    for ts in p.glob("assets/**/*.ts"):
-        meta = ts.with_suffix(".ts.meta")
-        if meta.exists():
-            assets["scripts"].append({
-                "rel": str(ts.relative_to(p)),
-                "uuid": _read_uuid(meta),
-            })
-
-    for scn in p.glob("assets/**/*.scene"):
-        meta = Path(f"{scn}.meta")
-        if meta.exists():
-            assets["scenes"].append({
-                "rel": str(scn.relative_to(p)),
-                "uuid": _read_uuid(meta),
-            })
-
-    for png in p.glob("assets/**/*.png"):
-        meta = Path(f"{png}.meta")
-        if meta.exists():
-            with open(meta) as f:
-                m = json.load(f)
-            uuid = m.get("uuid")
-            sub = m.get("subMetas", {})
-            assets["images"].append({
-                "rel": str(png.relative_to(p)),
-                "main_uuid": uuid,
-                "type": m.get("userData", {}).get("type", "texture"),
-                "sprite_frame_uuid": f"{uuid}@f9941" if "f9941" in sub else None,
-            })
-
-    for pf in p.glob("assets/**/*.prefab"):
-        meta = Path(f"{pf}.meta")
-        if meta.exists():
-            assets["prefabs"].append({
-                "rel": str(pf.relative_to(p)),
-                "uuid": _read_uuid(meta),
-            })
+    # Single walk of assets/; dispatch by suffix. Previously this made four
+    # separate rglob scans of the same tree.
+    for f in assets_dir.rglob("*"):
+        if not f.is_file():
+            continue
+        suffix = f.suffix.lower()
+        if suffix == ".ts":
+            meta_path = f.with_suffix(".ts.meta")
+            if meta_path.exists():
+                meta = _read_meta(meta_path)
+                assets["scripts"].append({
+                    "rel": str(f.relative_to(p)),
+                    "uuid": meta.get("uuid") if meta else None,
+                })
+        elif suffix == ".scene":
+            meta_path = Path(f"{f}.meta")
+            if meta_path.exists():
+                meta = _read_meta(meta_path)
+                assets["scenes"].append({
+                    "rel": str(f.relative_to(p)),
+                    "uuid": meta.get("uuid") if meta else None,
+                })
+        elif suffix == ".png":
+            meta_path = Path(f"{f}.meta")
+            if meta_path.exists():
+                m = _read_meta(meta_path) or {}
+                uuid = m.get("uuid")
+                sub = m.get("subMetas", {})
+                assets["images"].append({
+                    "rel": str(f.relative_to(p)),
+                    "main_uuid": uuid,
+                    "type": m.get("userData", {}).get("type", "texture"),
+                    "sprite_frame_uuid": f"{uuid}@f9941" if "f9941" in sub else None,
+                })
+        elif suffix == ".prefab":
+            meta_path = Path(f"{f}.meta")
+            if meta_path.exists():
+                meta = _read_meta(meta_path)
+                assets["prefabs"].append({
+                    "rel": str(f.relative_to(p)),
+                    "uuid": meta.get("uuid") if meta else None,
+                })
 
     return assets
 

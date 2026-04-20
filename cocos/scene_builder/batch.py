@@ -12,6 +12,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from ..types import BatchOpsResult
 from ._helpers import (
     LAYER_UI_2D,
     _attach_component,
@@ -56,7 +57,7 @@ def _make_generic(nid: int, type_name: str, prefix: str, props: dict) -> dict:
     return obj
 
 
-def batch_ops(scene_path: str | Path, operations: list[dict]) -> dict:
+def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
     """Execute multiple scene operations in one file read/write cycle.
 
     Supports $N back-references: if an op returns an int (node/component id),
@@ -358,8 +359,13 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> dict:
             else:
                 results.append({"error": f"unknown op: {action}"})
 
-        except Exception as e:
-            results.append({"error": f"op[{i}] {action}: {e}"})
+        except (KeyError, TypeError, ValueError, IndexError) as e:
+            # Only swallow errors that plausibly come from malformed op input
+            # (missing required field, wrong type, bad $N ref). Programmer
+            # bugs in this module (AttributeError, NameError, ImportError,
+            # RuntimeError, ...) should still bubble up so they surface in
+            # tests rather than being silently reported as "op failed".
+            results.append({"error": f"op[{i}] {action}: {type(e).__name__}: {e}"})
 
     _save_scene(scene_path, s)
     return {
