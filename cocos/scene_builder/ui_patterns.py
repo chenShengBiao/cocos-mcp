@@ -263,6 +263,247 @@ def add_main_menu(scene_path: str | Path,
     }
 
 
+def add_toast(scene_path: str | Path,
+              parent_id: int,
+              text: str,
+              duration: float = 2.0,
+              position: str = "bottom",
+              variant: str = "info",
+              width: int = 420,
+              height: int = 72,
+              margin: int = 40) -> dict:
+    """Transient pill-shaped notification that auto-fades.
+
+    Three phases in one animation clip:
+      1. fade-in   (0 → 255 opacity over 0.25s)
+      2. hold      (stay at 255 for ``duration`` - 0.5s)
+      3. fade-out  (255 → 0 over 0.25s)
+
+    Clip plays once (WrapMode.Normal) and holds the last keyframe — the
+    toast stays in-scene but invisible. To truly free memory the caller
+    wraps this with a timed ``cocos_delete_node`` via a script. For most
+    game UX the invisible-but-present toast is fine; they accumulate at
+    most a handful per scene.
+
+    ``variant`` maps to the theme's semantic colour for the background:
+      - ``"info"`` → surface (neutral)
+      - ``"success"`` / ``"warn"`` / ``"danger"`` → the matching preset
+    Text always uses ``text`` (or ``bg`` for danger/warn — see body).
+
+    Returns::
+
+        {
+          "toast_node_id": int,
+          "label_node_id": int,
+          "animation_component_id": int,
+        }
+    """
+    from ..project import create_animation_clip
+    from ..project.ui_tokens import _find_project_from_scene
+    from . import (
+        add_animation,
+        add_label,
+        add_node,
+        add_sprite,
+        add_ui_opacity,
+        add_uitransform,
+        add_widget,
+    )
+
+    if position not in ("top", "bottom"):
+        raise ValueError(f"position must be 'top' or 'bottom', got {position!r}")
+    if duration < 0.6:
+        # Fade-in (0.25) + fade-out (0.25) = 0.5; need SOME hold time for
+        # the message to actually be readable.
+        raise ValueError(
+            f"toast duration must be >= 0.6s (fade-in + fade-out + minimum hold), "
+            f"got {duration}"
+        )
+
+    # variant → bg color preset. 'info' is the subtle neutral surface;
+    # success/warn/danger use semantic colours so the toast *communicates*
+    # severity visually without the user reading the text.
+    bg_preset = {
+        "info": "surface",
+        "success": "success",
+        "warn": "warn",
+        "danger": "danger",
+    }.get(variant)
+    if bg_preset is None:
+        raise ValueError(
+            f"variant must be 'info'|'success'|'warn'|'danger', got {variant!r}"
+        )
+    # Info toast text uses the theme's text colour; coloured variants use
+    # bg so the text reads against the saturated background (white text
+    # on red/green/amber is the standard pattern).
+    label_color = "text" if variant == "info" else "bg"
+
+    # Widget align flags: bottom = 2+4+8 = 14 (bottom+left+right isn't
+    # right for a centered pill; we want horizontal center + top/bottom)
+    # Actually Widget works on per-edge distances. For a centered
+    # horizontal pill we use alignment 2+1 = 3 (bottom+top ambiguous...)
+    # Simpler approach: place via _lpos and widget only for horizontal
+    # centering. Use the node's lpos directly.
+    toast = add_node(scene_path, parent_id, f"Toast_{variant}",
+                     lpos=(0, -260 if position == "bottom" else 260, 0))
+    add_uitransform(scene_path, toast, width, height)
+    # Horizontal center + pin to bottom (align 2+16 won't work — cc.Widget
+    # flags are bitmask {top=1,bottom=2,left=4,right=8,horizCenter=16,
+    # vertCenter=32}). Pick horizontal center + vertical distance via _lpos.
+    add_widget(scene_path, toast, align_flags=16 | (2 if position == "bottom" else 1))
+
+    # Background sprite with variant color
+    add_sprite(scene_path, toast, color_preset=bg_preset)
+
+    # Label centered on the toast
+    label_node = add_node(scene_path, toast, "Label")
+    add_uitransform(scene_path, label_node, width - 2 * margin, height - 16)
+    add_widget(scene_path, label_node, align_flags=16 | 32)  # horiz+vert center
+    add_label(scene_path, label_node, text,
+              color_preset=label_color, size_preset="body",
+              h_align=1, v_align=1, overflow=2)  # SHRINK
+
+    # UIOpacity starting at 0 so the first rendered frame doesn't flash
+    add_ui_opacity(scene_path, toast, opacity=0)
+
+    # Three-phase fade clip. Times deliberately don't use sample=60's
+    # frame-aligned values because we want durations in tenths, not
+    # sixtieths — Cocos's interpolator handles fractional times fine.
+    fade_in_end = 0.25
+    fade_out_start = duration - 0.25
+    keyframes = [
+        {"time": 0.0, "value": 0},
+        {"time": fade_in_end, "value": 255},
+        {"time": fade_out_start, "value": 255},
+        {"time": duration, "value": 0},
+    ]
+
+    project = _find_project_from_scene(scene_path)
+    if project is None:
+        raise FileNotFoundError(
+            f"couldn't locate a Cocos project above {scene_path}. "
+            "Toast presets need to write a .anim asset; move the scene "
+            "under a project root."
+        )
+    clip = create_animation_clip(
+        project, clip_name=f"toast_{variant}_{toast}",
+        duration=duration, sample=60,
+        tracks=[{"path": "", "property": "opacity", "keyframes": keyframes}],
+        wrap_mode=1,  # Normal — play once and hold
+    )
+    anim_cid = add_animation(scene_path, toast,
+                             default_clip_uuid=clip["uuid"],
+                             play_on_load=True,
+                             clip_uuids=[clip["uuid"]])
+
+    return {
+        "toast_node_id": toast,
+        "label_node_id": label_node,
+        "animation_component_id": anim_cid,
+    }
+
+
+def add_loading_spinner(scene_path: str | Path,
+                        parent_id: int,
+                        sprite_frame_uuid: str | None = None,
+                        text: str | None = "Loading...",
+                        icon_size: int = 80,
+                        rotation_period: float = 1.0) -> dict:
+    """Centered rotating icon + optional caption.
+
+    When ``sprite_frame_uuid`` is given the icon spins continuously;
+    without one, falls back to a text-only loading indicator with a
+    gentle opacity pulse on the caption (via ``add_pulse``-equivalent
+    opacity cycle) so the user still sees activity.
+
+    ``rotation_period``: one full 360° revolution in seconds. Faster
+    feels impatient; slower feels stuck. 1.0s is the iOS / Material
+    default cadence.
+
+    Returns::
+
+        {
+          "spinner_node_id": int,
+          "icon_node_id": int | None,    # None when no sprite was given
+          "label_node_id": int | None,   # None when text=None
+          "rotation_component_id": int | None,
+        }
+    """
+    from ..project import create_animation_clip
+    from ..project.ui_tokens import _find_project_from_scene
+    from . import (
+        add_animation,
+        add_label,
+        add_node,
+        add_sprite,
+        add_uitransform,
+        add_widget,
+    )
+
+    spacing_md = resolve_spacing(scene_path, "md")
+    label_size = resolve_size(scene_path, "body")
+    total_h = icon_size + (spacing_md + label_size if text else 0)
+
+    # Container centered on parent via Widget
+    spinner = add_node(scene_path, parent_id, "LoadingSpinner")
+    add_uitransform(scene_path, spinner, max(icon_size, 240), total_h)
+    add_widget(scene_path, spinner, align_flags=16 | 32)  # center both
+
+    icon_node: int | None = None
+    rotation_cid: int | None = None
+
+    if sprite_frame_uuid is not None:
+        # Icon positioned at the top of the container so the label can
+        # sit below it without overlap.
+        icon_node = add_node(scene_path, spinner, "Icon",
+                             lpos=(0, total_h / 2 - icon_size / 2, 0))
+        add_uitransform(scene_path, icon_node, icon_size, icon_size)
+        add_sprite(scene_path, icon_node, sprite_frame_uuid=sprite_frame_uuid)
+
+        # Rotation clip: 0° → -360° for visually standard clockwise
+        # spin. (Cocos 2D eulerZ rotation: positive = counter-clockwise.)
+        project = _find_project_from_scene(scene_path)
+        if project is None:
+            raise FileNotFoundError(
+                f"couldn't locate a Cocos project above {scene_path}. "
+                "Loading spinner needs to write a .anim asset."
+            )
+        clip = create_animation_clip(
+            project, clip_name=f"spinner_rot_{icon_node}",
+            duration=rotation_period, sample=60,
+            tracks=[{
+                "path": "", "property": "rotation",
+                "keyframes": [
+                    {"time": 0.0, "value": 0},
+                    {"time": rotation_period, "value": -360},
+                ],
+            }],
+            wrap_mode=4,  # Loop
+        )
+        rotation_cid = add_animation(scene_path, icon_node,
+                                     default_clip_uuid=clip["uuid"],
+                                     play_on_load=True,
+                                     clip_uuids=[clip["uuid"]])
+
+    label_node: int | None = None
+    if text:
+        # Label sits at the bottom of the container
+        label_y = -total_h / 2 + label_size / 2
+        label_node = add_node(scene_path, spinner, "LoadingLabel",
+                              lpos=(0, label_y, 0))
+        add_uitransform(scene_path, label_node, 240, label_size + 8)
+        add_label(scene_path, label_node, text,
+                  color_preset="text_dim", size_preset="body",
+                  h_align=1, v_align=1, overflow=2)
+
+    return {
+        "spinner_node_id": spinner,
+        "icon_node_id": icon_node,
+        "label_node_id": label_node,
+        "rotation_component_id": rotation_cid,
+    }
+
+
 def add_hud_bar(scene_path: str | Path,
                 parent_id: int,
                 items: list[dict] | None = None,

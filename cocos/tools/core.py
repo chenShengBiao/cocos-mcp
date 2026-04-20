@@ -261,6 +261,31 @@ def register(mcp: FastMCP) -> None:
         return cp.list_builtin_themes()
 
     @mcp.tool()
+    def cocos_derive_theme_from_seed(seed_hex: str, mode: str = "dark") -> dict:
+        """Generate a coherent UI palette from one brand color.
+
+        Given ``seed_hex`` (the game's primary/brand color) and a ``mode``
+        ("dark" or "light"), computes a full color set via HSL math:
+          - secondary = complementary hue
+          - bg / surface = seed hue at low saturation (subtle brand tint)
+          - text / text_dim = high-contrast against bg
+          - border = mid-lightness neutral
+          - success/warn/danger stay at fixed green/amber/red (severity
+            readability trumps brand consistency)
+
+        Returns a ``{color: {...}}`` dict ready to pass through to
+        ``cocos_set_ui_theme(project, custom=<this>)``. The caller may
+        also merge in font_size / spacing / radius overrides before
+        passing.
+
+        Typical use::
+
+            palette = cocos_derive_theme_from_seed("#6366f1", mode="dark")
+            cocos_set_ui_theme("/game", custom=palette)
+        """
+        return cp.derive_theme_from_seed(seed_hex, mode)
+
+    @mcp.tool()
     def cocos_hex_to_rgba(hex_color: str, alpha: int = 255) -> dict:
         """Convert ``#rrggbb`` / ``#rgb`` / ``#rrggbbaa`` to RGBA ints.
 

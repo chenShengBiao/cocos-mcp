@@ -118,7 +118,9 @@ from .ui_lint import lint_ui
 from .ui_patterns import (
     add_dialog_modal,
     add_hud_bar,
+    add_loading_spinner,
     add_main_menu,
+    add_toast,
 )
 from .physics import (
     _attach_joint,

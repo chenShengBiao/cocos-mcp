@@ -66,6 +66,55 @@ def register(mcp: FastMCP) -> None:
                                 buttons, button_width, button_height)
 
     @mcp.tool()
+    def cocos_add_toast(scene_path: str, parent_node_id: int,
+                        text: str,
+                        duration: float = 2.0,
+                        position: str = "bottom",
+                        variant: str = "info",
+                        width: int = 420,
+                        height: int = 72) -> dict:
+        """Transient pill notification — fade in, hold, fade out.
+
+        ``variant`` picks the background:
+          - ``"info"`` → surface (neutral gray/slate)
+          - ``"success"`` / ``"warn"`` / ``"danger"`` → matching semantic color
+        Text uses ``text`` preset (info) or ``bg`` (colored variants) so it
+        always reads against the bg.
+
+        ``duration`` is total time including 0.25s fade-in + 0.25s fade-out.
+        Minimum 0.6s (else there's no readable hold window).
+        Clip plays once and holds invisible — toast stays in scene as a
+        zero-opacity node.
+
+        Returns {toast_node_id, label_node_id, animation_component_id}.
+        """
+        return sb.add_toast(scene_path, parent_node_id, text, duration,
+                            position, variant, width, height)
+
+    @mcp.tool()
+    def cocos_add_loading_spinner(scene_path: str, parent_node_id: int,
+                                  sprite_frame_uuid: str | None = None,
+                                  text: str | None = "Loading...",
+                                  icon_size: int = 80,
+                                  rotation_period: float = 1.0) -> dict:
+        """Centered rotating icon + optional caption.
+
+        Pass ``sprite_frame_uuid`` to get the rotation animation; pass
+        ``None`` for a text-only indicator. ``rotation_period`` is one
+        full 360° revolution — 1.0s is the iOS/Material default cadence.
+
+        Tip: generate a spinner sprite via
+        ``cocos_generate_asset(prompt='loading spinner icon, radial',
+        style='icon')`` then pass the returned sprite_frame_uuid here.
+
+        Returns {spinner_node_id, icon_node_id, label_node_id,
+        rotation_component_id}.
+        """
+        return sb.add_loading_spinner(scene_path, parent_node_id,
+                                      sprite_frame_uuid, text,
+                                      icon_size, rotation_period)
+
+    @mcp.tool()
     def cocos_add_hud_bar(scene_path: str, parent_node_id: int,
                           items: list[dict] | None = None,
                           height: int = 80,

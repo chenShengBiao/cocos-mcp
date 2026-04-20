@@ -373,6 +373,119 @@ def resolve_radius(scene_path: str | Path | None, preset: str) -> int:
     return int(val)
 
 
+# ----- seed-color theme derivation -----
+
+def _hex_to_hsl(hex_str: str) -> tuple[float, float, float]:
+    """#rrggbb → (h, s, l) with h∈[0,360), s,l∈[0,1]."""
+    r, g, b, _ = hex_to_rgba(hex_str)
+    rf, gf, bf = r / 255, g / 255, b / 255
+    mx, mn = max(rf, gf, bf), min(rf, gf, bf)
+    l = (mx + mn) / 2
+    if mx == mn:
+        h = s = 0.0
+    else:
+        d = mx - mn
+        s = d / (2 - mx - mn) if l > 0.5 else d / (mx + mn)
+        if mx == rf:
+            h = (gf - bf) / d + (6 if gf < bf else 0)
+        elif mx == gf:
+            h = (bf - rf) / d + 2
+        else:
+            h = (rf - gf) / d + 4
+        h *= 60
+    return h, s, l
+
+
+def _hsl_to_hex(h: float, s: float, l: float) -> str:
+    """Inverse of _hex_to_hsl. Clamps inputs so out-of-range values
+    from intermediate math don't overflow."""
+    h = h % 360
+    s = max(0.0, min(1.0, s))
+    l = max(0.0, min(1.0, l))
+
+    if s == 0:
+        v = int(round(l * 255))
+        return f"#{v:02x}{v:02x}{v:02x}"
+
+    def _hue_to_rgb(p: float, q: float, t: float) -> float:
+        t = t % 1.0
+        if t < 1/6:
+            return p + (q - p) * 6 * t
+        if t < 1/2:
+            return q
+        if t < 2/3:
+            return p + (q - p) * (2/3 - t) * 6
+        return p
+
+    q = l * (1 + s) if l < 0.5 else l + s - l * s
+    p = 2 * l - q
+    hh = h / 360
+    r = _hue_to_rgb(p, q, hh + 1/3)
+    g = _hue_to_rgb(p, q, hh)
+    b = _hue_to_rgb(p, q, hh - 1/3)
+    return f"#{int(round(r*255)):02x}{int(round(g*255)):02x}{int(round(b*255)):02x}"
+
+
+def derive_theme_from_seed(seed_hex: str, mode: str = "dark") -> dict:
+    """Derive a full theme dict from one seed color + dark/light mode.
+
+    Uses HSL math to spin a coherent palette around the seed's hue:
+    secondary is the complementary hue, bg/surface share the seed's
+    hue at low saturation (so the UI tints subtly toward the brand
+    color), text is high-contrast against bg, and text_dim sits between
+    them. The semantic colours (success/warn/danger) are fixed
+    green/amber/red because their meaning trumps brand consistency.
+
+    Returns a dict ready to pass as ``custom=`` to ``set_ui_theme``.
+    """
+    if mode not in ("dark", "light"):
+        raise ValueError(f"mode must be 'dark' or 'light', got {mode!r}")
+
+    h, s, _l = _hex_to_hsl(seed_hex)
+    # Clamp primary saturation so pale seed colours still give a readable
+    # secondary / text; saturations below ~0.3 produce bg-indistinguishable
+    # surface tints.
+    tinted_s = min(s, 0.15)  # used for bg/surface — low chroma tint
+
+    # Secondary: complementary hue, full saturation of the seed so the
+    # accent pops visibly against it.
+    secondary = _hsl_to_hex((h + 180) % 360, s if s > 0 else 0.7, 0.55)
+
+    if mode == "dark":
+        bg = _hsl_to_hex(h, tinted_s, 0.08)
+        surface = _hsl_to_hex(h, tinted_s, 0.14)
+        text = _hsl_to_hex(h, tinted_s * 0.5, 0.92)
+        text_dim = _hsl_to_hex(h, tinted_s * 0.5, 0.62)
+        border = _hsl_to_hex(h, tinted_s, 0.22)
+    else:  # light
+        bg = _hsl_to_hex(h, tinted_s * 0.5, 0.98)
+        surface = _hsl_to_hex(h, tinted_s * 0.5, 0.95)
+        text = _hsl_to_hex(h, tinted_s, 0.08)
+        text_dim = _hsl_to_hex(h, tinted_s, 0.42)
+        border = _hsl_to_hex(h, tinted_s, 0.86)
+
+    return {
+        "color": {
+            "primary":   seed_hex,
+            "secondary": secondary,
+            "bg":        bg,
+            "surface":   surface,
+            "text":      text,
+            "text_dim":  text_dim,
+            # Fixed semantic trio — a "danger" button needs to read red
+            # regardless of the game's brand. Swap out in a custom={...}
+            # follow-up if you disagree.
+            "success":   "#22c55e",
+            "warn":      "#f59e0b",
+            "danger":    "#ef4444",
+            "border":    border,
+        },
+        # Fonts / spacing / radius come from the dark_game defaults via
+        # the normal theme materialization path, so callers who want
+        # per-project type scale still set those independently.
+    }
+
+
 def _tokens_for(scene_path: str | Path | None) -> dict:
     """Locate tokens for the project enclosing ``scene_path``, falling
     back to the dark_game default when we can't find a project root.
