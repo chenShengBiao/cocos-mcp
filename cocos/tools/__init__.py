@@ -13,12 +13,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import build, core, media, physics_3d, physics_ui, scene
+from . import build, core, media, physics_3d, physics_ui, rendering_3d, scene
 
 if TYPE_CHECKING:  # pragma: no cover
     from mcp.server.fastmcp import FastMCP
 
-__all__ = ["build", "core", "media", "physics_3d", "physics_ui", "register_all", "scene"]
+__all__ = [
+    "build",
+    "core",
+    "media",
+    "physics_3d",
+    "physics_ui",
+    "register_all",
+    "rendering_3d",
+    "scene",
+]
 
 
 def register_all(mcp: FastMCP) -> None:
@@ -27,5 +36,6 @@ def register_all(mcp: FastMCP) -> None:
     scene.register(mcp)
     physics_ui.register(mcp)
     physics_3d.register(mcp)
+    rendering_3d.register(mcp)
     media.register(mcp)
     build.register(mcp)

@@ -132,6 +132,26 @@ from .physics_3d import (
     add_sphere_collider_3d,
     add_terrain_collider_3d,
 )
+from .rendering import (
+    CAMERA_DEFAULT_MASK,
+    PCF_HARD,
+    PCF_SOFT,
+    PCF_SOFT_2X,
+    PCF_SOFT_4X,
+    REFLECT_BAKED_CUBEMAP,
+    REFLECT_BLEND,
+    REFLECT_NONE,
+    REFLECT_PLANAR,
+    SHADOW_CAST_OFF,
+    SHADOW_CAST_ON,
+    SHADOW_RECV_OFF,
+    SHADOW_RECV_ON,
+    add_directional_light,
+    add_mesh_renderer,
+    add_skinned_mesh_renderer,
+    add_sphere_light,
+    add_spot_light,
+)
 from .prefab import (
     _shift_id_refs,
     create_prefab,
