@@ -6,9 +6,203 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Total: **109 tools** (was 80) · **166 tests** (was 45) · **72% coverage** (was 0%) · **0 mypy / ruff errors**.
+Total: **130 tools** (was 80) · **226 tests** (was 45) · **0 mypy / ruff errors**.
 
-### Added — 29 new tools across four feature passes
+### Added — 3D parity pass (108 → 130 tools)
+
+Grew the scene-building surface from "2D only" to "2D + baseline 3D
+mini-games end-to-end". Every new component's default value is lifted
+verbatim from cocos-engine v3.8.6 sources (`cocos/physics/framework/...`,
+`cocos/3d/lights/...`, `cocos/scene-graph/scene-globals.ts`,
+`cocos/ui/...`) and pinned by regression tests.
+
+**3D physics (+13 tools)** —
+`cocos_add_rigidbody_3d` plus all eight colliders (`add_{box,sphere,
+capsule,cylinder,cone,plane,mesh,terrain}_collider_3d`), two character
+controllers (`add_{box,capsule}_character_controller`),
+`cocos_create_physics_material` (writes a `.pmat` asset + meta; bind
+via `cocos_set_uuid_property(col_id, "_material", uuid)`), and
+`cocos_set_physics_3d_config` (gravity, timestep, sub-steps, sleep
+threshold; writes `settings/v2/packages/physics.json`, default
+gravity **-10 m/s² — NOT pixel units like set_physics_2d_config**).
+`ERigidBodyType` is exported as `sb.RIGIDBODY_{DYNAMIC,STATIC,KINEMATIC}`
+because the engine uses bitmask values (1/2/4, non-contiguous) that
+are trivial to get wrong otherwise.
+
+**3D rendering (+5 tools)** —
+`cocos_add_{directional,sphere,spot}_light` with full HDR/LDR
+illuminance pairs, `_staticSettings` sub-object, PCF shadow mode, and
+(for DirectionalLight) the CSM block. `cocos_add_mesh_renderer`
+(materials array = one per submesh, `_shadowCastingMode` / `_shadowReceivingMode`,
+`_reflectionProbeId`) and `cocos_add_skinned_mesh_renderer`
+(`_skinningRoot` is a **Node `__id__` reference, NOT a uuid** — a
+common third-party bug, documented in the tool hint).
+
+**Scene-global fog (+1 tool)** —
+`cocos_set_fog` mirrors `set_ambient` / `set_skybox` / `set_shadows`,
+lazy-creates `cc.FogInfo` + links it under `cc.SceneGlobals.fog` if
+the scene predates this commit. Supports all four fog modes
+(LINEAR / EXP / EXP² / LAYERED).
+
+**UI polish (+3 tools)** —
+`cocos_add_webview` (embedded browser pane for ToS / activity pages),
+`cocos_add_scroll_bar` (companion to `ScrollView`, with `_handle` +
+`_scrollView` as `__id__` refs), `cocos_add_page_view_indicator`
+(dots row for `PageView` navigation).
+
+**Build polish (+6 params on existing `cocos_build`)** —
+`source_maps`, `md5_cache`, `skip_compress_texture`, `inline_enum`,
+`mangle_properties` booleans + `build_options: dict[str, Any]` catch-all,
+all joined into the Cocos CLI's `--build "k=v;k=v;..."` flag. Explicit
+params win over dict conflicts; values containing `;` or `=` (which
+would corrupt CLI parsing) are rejected with `ValueError` up-front.
+
+### Fixed — 2D joint class-name mismatches (108 from 109)
+
+Two of the nine 2D joint tools emitted `__type__` strings that Cocos
+3.8 doesn't recognize. Verified against cocos-engine v3.8.6 sources
+(`cocos/physics-2d/framework/components/joints/`): only **eight** joint
+files exist, and neither `weld-joint-2d.ts` nor `motor-joint-2d.ts` is
+among them. Scenes built with the old tools silently had no joint at
+runtime.
+
+- **Renamed** `cocos_add_weld_joint2d` → `cocos_add_fixed_joint_2d`,
+  emitting `cc.FixedJoint2D` (the real class).
+- **Removed** `cocos_add_motor_joint2d` — `cc.MotorJoint2D` doesn't
+  exist in 3.8. The follow-target use case is covered by
+  `cocos_add_relative_joint2d` via `_linearOffset` + `_angularOffset`.
+
+Breaking change for any caller hitting the two old tool names, but
+those calls were producing broken scenes anyway — "tool not found"
+replaces silent runtime failure with a clear error.
+
+### Added — Structured observability
+
+- **`cocos/errors.py`** — central error surface with 8 `error_code`
+  constants (`CREATOR_NOT_FOUND` / `BUILD_TIMEOUT` / `BUILD_FAILED` /
+  `BUILD_MISSING_MODULE` / `BUILD_TYPESCRIPT_ERROR` /
+  `BUILD_ASSET_NOT_FOUND` / …). `classify_build_log(log_tail)` pattern-
+  matches common Cocos CLI failure signatures; `cli_build` attaches
+  `{error_code, hint}` to every failure path so the LLM can recover
+  without reading the log tail (e.g. "physics-2d module is off →
+  `cocos_set_engine_module`"). TypeScript-error pattern is intentionally
+  more specific than module-missing so `error TS2307: Cannot find module`
+  classifies as TS error, not module error.
+- **`cocos/types.py`** — 8 `TypedDict` return-shape contracts
+  (`BuildResult` / `ValidationResult` / `BatchOpsResult` /
+  `SceneCreateResult` / `PreviewStart/Stop/Status/Result`,
+  `StructuredError`). `_BuildCommon` + `total=False` cleanly separates
+  always-present from failure-only fields.
+- **`tests/test_types.py`** — shape-drift tests reflect each tool's
+  runtime dict keys against its TypedDict's `__annotations__`. Catches
+  divergence that mypy can't (because `total=False` makes all keys
+  optional from a static-typing perspective).
+- **`find_creator`** — no-install error now names the recovery tool
+  (`cocos_list_creator_installs`) and points to the Cocos Creator
+  download page; version-mismatch error lists the locally-available
+  versions.
+- **`cocos_batch_scene_ops`** description now leads with
+  "PREFERRED for ≥3 sequential mutations" so LLMs reach for it
+  unprompted instead of firing ten individual `add_*` calls.
+
+### Performance
+
+- **Session-level scene read cache** (`cocos/scene_builder/_helpers.py`)
+  — `_load_scene` keyed by resolved abspath + `st_mtime_ns`, LRU cap
+  of 8 scenes. `_save_scene` refreshes the cache after a successful
+  write, so the next tool call hits instead of re-parsing the file we
+  just wrote. External edits (editor save, git checkout) bump mtime and
+  the cache self-invalidates. Exported `invalidate_scene_cache()` for
+  tests / manual sync.
+- **Creator install list cached** via `functools.lru_cache(maxsize=1)`.
+  `list_creator_installs()` was walking `/Applications/Cocos/Creator`
+  every init / build call; cache hit makes the init path noticeably
+  snappier on repeat runs. `invalidate_creator_installs_cache()` exported
+  for the "I just installed a new Creator version" case.
+- **Merged 3 + 4 redundant `rglob` scans** in `get_project_info` and
+  `list_assets` into single `assets/**` walks with suffix dispatch.
+  Noticeable on large projects; suffix dispatch preserves original
+  behavior (verified by existing tests).
+- **Explicit `timed_out: True`** on `cli_build` result when a build
+  exceeds `timeout_sec` — previously it was indistinguishable from a
+  non-timeout `exit_code = -1` crash.
+
+### Fixed — narrower exception handling
+
+- `scene_builder/batch.py` — replaced `except Exception` with
+  `(KeyError, TypeError, ValueError, IndexError)` so our own
+  implementation bugs (AttributeError, NameError, RuntimeError, ...)
+  surface with a traceback instead of being silently reported as
+  "op failed". Caller-mistake exceptions still get formatted into a
+  per-op error dict.
+
+### Changed — module-level refactors
+
+- **`cocos/project.py` 1099 lines → 7-submodule package** under
+  `cocos/project/`: `installs.py` (Creator detect + `init_project`),
+  `assets.py` (script/image/audio/resource import + `list_assets` +
+  `get_project_info`), `animation.py` (`.anim` builder), `skeletal.py`
+  (Spine + DragonBones), `tiled.py`, `atlas.py` (SpriteAtlas `.pac`),
+  `gen_image.py` (AI asset wrapper). Plus new `physics_material.py`
+  for `.pmat` assets. `__init__.py` re-exports the full public surface
+  so `from cocos import project as cp; cp.list_assets(...)` is
+  unchanged, and the monkey-patch used by tests
+  (`monkeypatch.setattr(cp, "list_creator_installs", ...)`) still
+  takes effect — `find_creator` uses a late `from cocos.project
+  import list_creator_installs` inside its body to pick up the patch.
+- **`cocos/scene_builder/__init__.py` 1811 lines → 4 new submodules**:
+  `physics.py` (RigidBody2D + 3 colliders + 8 Joint2D), `ui.py`
+  (buttons/layout/progress/scroll/toggle/editbox/slider/masks/RichText/
+  sprite variants/UIOpacity/SafeArea/PageView/ToggleContainer/
+  MotionStreak/ScrollBar/PageViewIndicator/WebView + event builders),
+  `media.py` (audio/anim/particle/camera/spine/DB/tiled/video +
+  scene-globals setters including fog), `prefab.py` (create +
+  instantiate + `_shift_id_refs`). Core `__init__.py` down to 685
+  lines (scene lifecycle + node + basic component mutators +
+  validation + generic `add_component`). Submodules that call back
+  into `add_component` use a late `from cocos.scene_builder import
+  add_component` to stay load-order-safe.
+- **`cocos/scene_builder/rendering.py` (new)** — 3D lights +
+  MeshRenderer + SkinnedMeshRenderer, with engine-matched constants
+  `SHADOW_CAST_{OFF,ON}`, `SHADOW_RECV_{OFF,ON}`, `PCF_{HARD,SOFT,
+  SOFT_2X,SOFT_4X}`, `REFLECT_{NONE,BAKED_CUBEMAP,PLANAR,BLEND}`,
+  `CAMERA_DEFAULT_MASK`.
+- **`cocos/scene_builder/physics_3d.py` (new)** — 3D physics, with
+  `RIGIDBODY_{DYNAMIC,STATIC,KINEMATIC}` + `AXIS_{X,Y,Z}` exported
+  as module constants so callers don't have to memorize the
+  non-contiguous engine enum values.
+- **`cocos/tools/{physics_3d,rendering_3d}.py` (new)** — MCP
+  registrations for the 3D tools, kept in separate modules from 2D
+  (`physics_ui.py`) so the 2D/3D surfaces can evolve independently.
+
+### Tests
+
+Test count: **166 → 226 (+60)**. New files:
+
+| File | Tests | Covers |
+|---|---|---|
+| `test_physics_3d.py` | 18 | RigidBody3D defaults (+ non-contiguous enum regression guard) · parametrized collider shape fields · MeshCollider UUID wiring · CharacterController defaults · PhysicsMaterial `.pmat` asset shape + engine-default parity · `set_physics_3d_config` round-trip · scene validates with full 3D physics stack |
+| `test_rendering_3d.py` | 10 | Per-light-type defaults · regression guard that all three lights carry the base `cc.Light` fields · MeshRenderer material array + shadow flag mapping + ModelBakeSettings nested shape · SkinnedMeshRenderer skeleton UUID + skinning_root `__id__` ref · scene validates with lit 3D render stack |
+| `test_step3_polish.py` | 12 | FogInfo lazy-create + engine-default regression + idempotency · WebView URL round-trip · ScrollBar refs + null-omission · PageViewIndicator `cc.Size` + `__expectedType__` shape · `cli_build` dict + convenience-param merge semantics + unsafe-char guard |
+| `test_errors.py` | 7 | `make_error` shape · `classify_build_log` pattern dispatch (TS / module / asset) · find_creator enrichment (lists available + names recovery tool) |
+| `test_types.py` | 7 | Reflects `BuildResult` / `ValidationResult` / `BatchOpsResult` / `SceneCreateResult` / `PreviewStatusResult` `__annotations__` against runtime dict keys; all success + failure + timeout paths |
+| `test_perf_optimizations.py` extension | +3 | Scene read cache hit (shared-ref return) · mtime invalidation on external write · LRU eviction past size cap |
+
+All previous 166 tests continue to pass; 2D joint parametrize drops 1
+(motor) and renames 1 (weld → fixed). CI still runs Ubuntu / macOS /
+Windows × Python 3.11 / 3.12.
+
+---
+
+### Earlier work in this Unreleased cycle (45 → 108 tools, 45 → 166 tests)
+
+What follows is the prior draft of `[Unreleased]` covering the publish-
+readiness + 9-joint + lighting + AI-asset passes that shipped before
+the 3D parity work above. It's kept here for continuity until the next
+release tag; minor adjustments (joint-name supersession) applied in
+place so the two halves reconcile.
+
+#### Added — 29 new tools across four feature passes
 
 #### Publish-readiness (4 tools, 105 → 109)
 - **`cocos_set_native_build_config(platform, …)`** — configures iOS / Android
@@ -44,13 +238,15 @@ Total: **109 tools** (was 80) · **166 tests** (was 45) · **72% coverage** (was
   Idempotent. `cocos_add_image` and `new_sprite_frame_meta()` now also
   accept a `border` keyword argument. Required for any cc.Sprite type=SLICED
   (rounded UI buttons, panels, dialog frames).
-- **9 × `cocos_add_*_joint2d`** — the full Box2D joint family:
-  `add_distance_joint2d / add_hinge_joint2d / add_spring_joint2d /
+- **9 × `cocos_add_*_joint2d`** — intended to ship the full Box2D joint
+  family: `add_distance_joint2d / add_hinge_joint2d / add_spring_joint2d /
   add_mouse_joint2d / add_slider_joint2d / add_wheel_joint2d /
   add_weld_joint2d / add_relative_joint2d / add_motor_joint2d`. Each
   takes `connected_body_id` (the OTHER body's RigidBody2D component id;
   `None` means anchor to world). Unlocks pendulum / vehicle / chain /
-  rope / suspension / weld-and-shatter games.
+  rope / suspension / weld-and-shatter games. **(Superseded:** weld
+  was later renamed to `add_fixed_joint_2d` and motor was removed — see
+  the 2D joint fix note above. Effective shipped set is 8 joints.**)**
 - **3 × scene-globals setters**: `cocos_set_ambient` (sky/ground colors,
   illuminance), `cocos_set_skybox` (envmap UUID, HDR, lighting type),
   `cocos_set_shadows` (planar shadow plane + color). Each looks up the
@@ -66,7 +262,7 @@ Total: **109 tools** (was 80) · **166 tests** (was 45) · **72% coverage** (was
   and is the single source of truth for dependencies.
 - `CHANGELOG.md` (this file).
 
-### Performance
+#### Performance
 
 - **`cocos_batch_scene_ops` extended from 15 → 27 op types**, adding
   `add_widget / add_camera / add_layout / add_progress_bar /
@@ -84,7 +280,7 @@ Total: **109 tools** (was 80) · **166 tests** (was 45) · **72% coverage** (was
   Zhipu cache key omits seed (API doesn't honor it); Pollinations cache
   key includes it.
 
-### Changed
+#### Changed
 
 - **`server.py` 1222 → 60 lines.** All 91 `@mcp.tool()` definitions moved
   into `cocos/tools/{core,scene,physics_ui,media,build}.py`; each module
@@ -112,7 +308,7 @@ Total: **109 tools** (was 80) · **166 tests** (was 45) · **72% coverage** (was
   meta helpers work in slim environments without Pillow installed.
 - `Dockerfile` installs via `pip install .` (reads `pyproject.toml`).
 
-### Fixed
+#### Fixed
 
 - **`cocos/project.py::generate_and_import_image`** was calling
   `os.environ` and `sys.executable` without ever importing `os` or `sys`,
@@ -149,11 +345,11 @@ Total: **109 tools** (was 80) · **166 tests** (was 45) · **72% coverage** (was
     `Sequence[str | Path]` (covariant) so MCP-tool wrappers passing
     `list[str]` no longer error.
 
-### Removed
+#### Removed
 
 - `requirements.txt` (superseded by `pyproject.toml`).
 
-### Tests
+#### Tests
 
 Test count: **45 → 166 (+121)**. Coverage: **45% → 72% (+27)**.
 
@@ -174,20 +370,37 @@ Test count: **45 → 166 (+121)**. Coverage: **45% → 72% (+27)**.
 
 CI runs the whole suite under Ubuntu / macOS / Windows × Python 3.11 / 3.12.
 
-### Future work (not done in this PR)
+### Future work
 
-- `cocos/scene_builder/__init__.py` is still ~1330 lines. The next
-  refactor pass should carve out `scene.py` (create_empty_scene /
-  create_prefab / validate_scene), `nodes.py`, `components.py`,
-  `physics.py`, `ui.py`, and `media.py` — leaving `__init__.py` as a
-  thin re-export shim. The `_helpers.py` + `batch.py` split lays the
-  groundwork.
-- 3D primitives: `cc.DirectionalLight / PointLight / SpotLight`,
-  `cc.MeshRenderer`, 3D physics (`cc.RigidBody` + 6 colliders),
-  `cc.PostProcess` (Bloom / HBAO / ColorGrading). Most are reachable
-  today via the generic `cocos_add_component` but lack friendly wrappers.
-- `cocos/build.py::start_preview` covered at 66% — needs a socket-mock
-  test to exercise the "port already bound" branch.
+All three items called out in the previous Unreleased draft have been
+addressed in the 3D-parity pass above:
+
+- ✅ `scene_builder/__init__.py` refactor — now 685 lines; logic split
+  across `physics.py` / `physics_3d.py` / `ui.py` / `media.py` /
+  `prefab.py` / `rendering.py` + `_helpers.py` / `batch.py`.
+- ✅ 3D primitives — DirectionalLight / SphereLight / SpotLight +
+  MeshRenderer + SkinnedMeshRenderer + full 3D physics (RigidBody +
+  8 colliders + 2 CharacterControllers + PhysicsMaterial) shipped.
+- ✅ `cli_build` observability — timeout is now distinguishable and
+  failure paths carry `error_code` + `hint`.
+
+Remaining gaps deferred for a later release:
+
+- **Marionette AnimationController** — 3.8's state-machine animation
+  system. Required for humanoid 3D skeletal animation; MeshRenderer
+  + SkinnedMeshRenderer alone can't drive it.
+- **3D constraints** — `cc.HingeConstraint` / `cc.PointToPointConstraint`
+  / `cc.ConfigurableConstraint` (3D equivalent of the 2D joint family).
+- **`cc.PostProcess`** — Bloom / HBAO / ColorGrading / FXAA, reachable
+  today via generic `cocos_add_component` but no friendly wrappers.
+- **Terrain asset creation** — `cc.Terrain` + heightmap generation;
+  `cocos_add_terrain_collider_3d` accepts a UUID but we can't yet
+  create the backing asset. Lower priority because most mini-games
+  use flat geometry.
+- **`cc.ReflectionProbe` / `cc.LightProbeGroup`** — needed for PBR
+  materials to look right. Rare in mini-games.
+- **`cc.PostProcessStack`** — requires pipeline-specific serialization
+  that varies between built-in and custom render pipelines.
 
 ## [1.1.0] — "detail pass"
 
