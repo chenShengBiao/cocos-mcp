@@ -6,7 +6,154 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Total: **130 tools** (was 80) · **226 tests** (was 45) · **0 mypy / ruff errors**.
+Total: **135 tools** (was 80) · **266 tests** (was 45) · **0 mypy / ruff errors**.
+
+### Added — Post-build patch registry (131 → 135 tools)
+
+Cocos regenerates ``build/<platform>/`` from scratch every build, so
+manual edits to files with no Cocos source-config switch (style.css
+body bg, ``project.config.json`` fields beyond builder.json's surface,
+custom index.html) get wiped on every rebuild. This commit introduces
+a declarative patch registry at
+``settings/v2/packages/post-build-patches.json`` + auto-apply inside
+``cli_build``.
+
+**Three patch kinds** (in ``cocos/project/post_build_patches.py``):
+
+- ``json_set`` — dotted-path navigation, creates missing intermediate
+  dicts, refuses to descend into a non-dict (which would silently
+  corrupt user data).
+- ``regex_sub`` — ``re.sub`` with ``count=1``. Must match at least once
+  at apply time; a drifted pattern after a Cocos bump becomes an
+  explicit ``errors[0]`` entry rather than a silent regression.
+- ``copy_from`` — whole-file copy from a project-root-relative source
+  over the build target.
+
+**Four new MCP tools**:
+
+- ``cocos_register_post_build_patch(patches, mode='append'|'replace')``
+  — batched registration is atomic: one invalid patch in the list
+  fails the whole call and the registry file stays untouched.
+- ``cocos_list_post_build_patches`` — returns patches with indices for
+  later selective removal.
+- ``cocos_remove_post_build_patches(indices|platform|file)`` —
+  precedence: indices > platform+file AND filter. Calling with all
+  None is a no-op (explicit wipe requires ``register([], mode='replace')``
+  — forces the user to think twice about clearing the whole list).
+- ``cocos_apply_post_build_patches(platform, dry_run=False)`` —
+  normally ``cli_build`` runs this automatically on success; exposed
+  for dry-run preview and re-apply-without-rebuild.
+
+**Validation hardening** (at register time, not apply time — the right
+moment is when the author writes the patch):
+
+- ``kind`` in the supported set
+- ``file`` relative path, no ``..`` segments (path-injection guard)
+- ``copy_from`` source similarly constrained
+- ``regex_sub.find`` must compile
+- ``json_set.path`` non-empty; ``value`` must be present
+
+**cli_build integration**:
+
+- New ``apply_patches: bool = True`` param.
+- After ``success==True``, walks the registry for matching-platform
+  patches and applies them in order, **stopping on first error** so
+  patch failures can't cascade across files.
+- Result carries ``post_build_patches: {platform, dry_run, build_dir,
+  applied, skipped, errors, ok}``.
+- When the build itself passed but patches broke, ``success`` flips to
+  False and ``error_code`` is **``POST_BUILD_PATCH_FAILED``** with a
+  hint that points at ``cocos_list_post_build_patches`` — the caller
+  isn't sent to grep the Cocos log for a nonexistent problem.
+
+**Tests (+24, tests/test_post_build_patches.py)**:
+
+- Register: append vs replace, atomic-fail-on-bad-batch, rejects
+  absolute paths / ``..`` / unknown kinds
+- Remove: platform filter, index list, no-op-when-no-filter (safety)
+- json_set: simple, creates intermediates, refuses non-dict traversal
+- regex_sub: replaces, errors when pattern doesn't match
+- copy_from: overwrites target, errors if source missing
+- Apply: filters by platform, skips missing files (no raise), dry_run
+  doesn't touch fs, stops on first error (no cascade)
+- cli_build: auto-apply on success, ``apply_patches=False`` skips,
+  patch failure surfaces ``POST_BUILD_PATCH_FAILED``, no-patches-
+  registered still emits a consistent (empty) report shape
+
+### Added — Friction-reducer pass (130 → 131 tools)
+
+Four targeted fixes for the top "AI client gets stuck" failure modes.
+None add components; all reduce the number of round-trips between the
+orchestrating LLM and the tools when something doesn't work first try.
+
+**Creator path discovery** (``cocos/project/installs.py``):
+
+The hardcoded ``INSTALL_ROOTS`` misses common setups (symlinked
+locations, ``~/Applications`` on macOS, ``D:\`` drives). Added three
+precedence-ordered escape hatches:
+
+1. ``COCOS_CREATOR_PATH`` env var — pins a single install.
+2. ``COCOS_CREATOR_EXTRA_ROOTS`` env var — ``:``/``;`` separated
+   additional scan roots.
+3. ``$PATH`` probe — ``shutil.which("CocosCreator")`` then back-walk
+   to the install root.
+
+``find_creator``'s "no install" error now lists all four escape hatches
+(download + three env/PATH options). A bad ``COCOS_CREATOR_PATH`` falls
+through to auto-discovery rather than silently swallowing the error.
+
+**TS error structured parsing** (``cocos/errors.py``, ``cocos/build.py``):
+
+``classify_build_log`` already routes TS compile failures to
+``BUILD_TYPESCRIPT_ERROR``. Added ``parse_ts_errors()`` that extracts
+per-diagnostic ``{file, line, col, code, message}`` tuples from the
+``tsc``-format output in the log tail. When ``cli_build`` classifies
+the failure as TS, it attaches ``ts_errors: list[dict]`` to
+``BuildResult`` so the AI can Read+Edit each offending file directly
+instead of re-parsing the log.
+
+**Script UUID auto-compress** (``cocos/scene_builder/__init__.py``):
+
+``add_script`` previously required the 23-char compressed UUID form
+(what the engine resolves at runtime). Callers often copy-pasted the
+36-char standard form from ``cocos_list_assets`` / ``.ts.meta`` —
+scene saved fine, build succeeded, component became a silent no-op
+because the engine couldn't resolve the class. Now auto-compresses
+any 36-char dashed UUID before writing. Zero-risk change since the
+36-char path was already a silent bug.
+
+**Engine-module audit** (``cocos/scene_builder/modules.py`` +
+``cocos_audit_scene_modules``):
+
+Single biggest runtime-failure mode: attaching a component whose
+engine module is off in ``settings/v2/packages/engine.json``. Build
+artifacts are structurally fine, the scene loads, but the component
+class doesn't register and the feature silently does nothing.
+
+New tool cross-checks scene ``__type__``s against a 30+ entry
+``COMPONENT_REQUIRES_MODULE`` map vs. the project's ``engine.json``.
+Returns ``{ok, required, enabled, disabled, actions}`` where
+``actions`` is copy-pasteable ``cocos_set_engine_module`` + library
+clean commands. ``physics-2d-box2d`` / ``physics-2d-builtin``
+satisfies the ``physics-2d`` requirement (matches Cocos inspector
+semantics). Walks up from ``scene_path`` to find ``package.json`` when
+``project_path`` is None; raises explicitly if unfindable.
+
+``cc.Camera`` intentionally NOT in the map — every UI scene created
+via ``create_empty_scene`` attaches one and 2D builds work fine
+without base-3d. Only the genuinely 3D-exclusive renderers
+(MeshRenderer, DirectionalLight/SphereLight/SpotLight) require base-3d.
+
+**Tests (+16, tests/test_friction_reducers.py)**:
+
+- Creator path: ``COCOS_CREATOR_PATH`` pin / bad-pin fallback /
+  ``COCOS_CREATOR_EXTRA_ROOTS`` / PATH probe / error lists 4 hatches
+- TS errors: regex extraction / empty inputs / cli_build integration
+- UUID compress: 36→23 round-trip + 23-char no-op
+- Module audit: RigidBody2D flagged when physics-2d off /
+  ``physics-2d-box2d`` satisfies physics-2d / plain UI scene ok /
+  multiple missing flagged / walks up to find project / raises on
+  unfindable project
 
 ### Added — 3D parity pass (108 → 130 tools)
 
