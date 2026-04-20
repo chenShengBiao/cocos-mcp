@@ -115,6 +115,14 @@ from .animation_presets import (
     add_slide_in,
 )
 from .ui_lint import lint_ui
+from .responsive import (
+    anchor_to_edge,
+    center_in_parent,
+    make_fullscreen,
+    stack_horizontally,
+    stack_vertically,
+)
+from .styled_text import add_styled_text_block
 from .ui_patterns import (
     add_card_grid,
     add_dialog_modal,

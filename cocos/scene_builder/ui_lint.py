@@ -46,6 +46,18 @@ _LARGE_TEXT_THRESHOLD = 32
 # border; higher thresholds miss truly bad overlaps.
 _OVERLAP_AREA_FRACTION = 0.25
 
+# ``huge_font_small_box``: a label's UITransform height must be at least
+# this multiple of its font_size or text gets clipped vertically. 1.2 is
+# the common lineHeight-ish ratio — below it we're almost certainly
+# cropping ascenders/descenders.
+_FONT_BOX_RATIO = 1.2
+
+# ``many_buttons_no_layout``: when a parent has this many clickable
+# children without a cc.Layout, the child positions were likely
+# hand-picked — and AI-picked positions on N>6 siblings almost always
+# have drift / overlap issues by the Nth button.
+_MANY_BUTTONS_THRESHOLD = 6
+
 
 def _components_on(scene: list, node_id: int) -> list[dict]:
     """All component objects attached to the node, resolved from _components refs."""
@@ -289,6 +301,26 @@ def lint_ui(scene_path: str | Path) -> dict:
                         ),
                     })
 
+        # ---- Rule: font_size too big for its UITransform box ----
+        if label_cmp is not None and uit is not None:
+            font_size = label_cmp.get("_fontSize", 0)
+            if font_size:
+                content_size = uit.get("_contentSize") or {}
+                box_h = content_size.get("height", 0)
+                if box_h and box_h < font_size * _FONT_BOX_RATIO:
+                    warnings.append({
+                        "rule": "huge_font_small_box",
+                        "node_id": i,
+                        "node_name": node_name,
+                        "message": (
+                            f"cc.Label on '{node_name}' uses font_size={font_size} "
+                            f"in a {int(box_h)}px-tall UITransform — vertical "
+                            f"clipping likely. Either increase the height to "
+                            f"≥ {int(font_size * _FONT_BOX_RATIO)} or drop the "
+                            "font_size (try size_preset='body' / 'caption')."
+                        ),
+                    })
+
         # ---- Rule: UI layer mismatch ----
         # Nodes with UI components should be on LAYER_UI_2D (33554432) so
         # the Canvas camera renders them. A common gotcha: AI sets a
@@ -374,6 +406,71 @@ def lint_ui(scene_path: str | Path) -> dict:
                             "or split them across different parents."
                         ),
                     })
+
+        # ---- Rule: many clickable siblings without cc.Layout ----
+        # When a parent has lots of buttons hand-positioned, AI almost
+        # always picks drifting _lpos values that look "fine" in local
+        # testing but produce overlaps / misalignment at different
+        # resolutions. Layout components fix this at runtime.
+        if len(buttons) >= _MANY_BUTTONS_THRESHOLD:
+            parent_obj = scene[parent]
+            parent_has_layout = any(
+                c.get("__type__") == "cc.Layout"
+                for c in _components_on(scene, parent)
+            )
+            if not parent_has_layout:
+                parent_name = parent_obj.get("_name", "?") if isinstance(parent_obj, dict) else "?"
+                warnings.append({
+                    "rule": "many_buttons_no_layout",
+                    "node_id": parent,
+                    "node_name": parent_name,
+                    "message": (
+                        f"'{parent_name}' has {len(buttons)} direct button "
+                        "children but no cc.Layout — manual positioning at "
+                        "this scale usually drifts at different resolutions. "
+                        "Attach cc.Layout (type=VERTICAL or HORIZONTAL) so "
+                        "the engine arranges them."
+                    ),
+                })
+
+    # ---- Rule: nested cc.Mask (performance) ----
+    # Each cc.Mask adds two stencil-buffer passes (clear + write) per
+    # frame. Nested masks compound: a Mask whose ancestor chain already
+    # includes another Mask is often a 3-6× fragment-shader cost for
+    # no visible effect (the inner mask's region is already clipped by
+    # the outer). Flag so the caller reconsiders whether the inner one
+    # is necessary.
+    mask_nodes: set[int] = {
+        i for i, obj in enumerate(scene)
+        if isinstance(obj, dict) and obj.get("__type__") == "cc.Node"
+        and any(c.get("__type__") == "cc.Mask" for c in _components_on(scene, i))
+    }
+    for mask_id in mask_nodes:
+        cur = _parent_id(scene, mask_id)
+        depth = 0
+        while cur is not None and depth < 24:
+            if cur in mask_nodes:
+                mask_obj = scene[mask_id]
+                mask_name = mask_obj.get("_name", "?") if isinstance(mask_obj, dict) else "?"
+                ancestor_obj = scene[cur]
+                ancestor_name = (ancestor_obj.get("_name", "?")
+                                 if isinstance(ancestor_obj, dict) else "?")
+                warnings.append({
+                    "rule": "nested_mask_perf",
+                    "node_id": mask_id,
+                    "node_name": mask_name,
+                    "message": (
+                        f"cc.Mask on '{mask_name}' is nested inside another "
+                        f"cc.Mask at '{ancestor_name}'. Each mask adds two "
+                        "stencil passes per frame; nesting multiplies the "
+                        "cost. Usually the outer mask's clip region already "
+                        "covers the inner — drop the inner mask or move the "
+                        "inner content outside the outer mask's subtree."
+                    ),
+                })
+                break
+            cur = _parent_id(scene, cur)
+            depth += 1
 
     return {
         "ok": not warnings,

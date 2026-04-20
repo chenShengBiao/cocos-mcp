@@ -115,6 +115,95 @@ def register(mcp: FastMCP) -> None:
                                       icon_size, rotation_period)
 
     @mcp.tool()
+    def cocos_add_styled_text_block(scene_path: str, parent_node_id: int,
+                                    title: str,
+                                    subtitle: str | None = None,
+                                    body: str | None = None,
+                                    width: int = 400,
+                                    show_divider: bool = True,
+                                    align: str = "center") -> dict:
+        """Title + optional subtitle + optional divider + optional body, stacked.
+
+        The single most frequently rebuilt pattern in AI UI code — hoisted
+        here so you don't compose it from 4-6 add_label calls every time.
+        Pulls colors from the active UI theme: title uses ``text`` preset,
+        subtitle uses ``text_dim``, divider uses ``border``. Body has
+        wrap + overflow=RESIZE_HEIGHT so long paragraphs grow the block
+        instead of clipping.
+
+        Divider only materializes when body is present AND show_divider=True
+        — dividing the top of the block from nothing is visual noise.
+        ``align``: "left" / "center" / "right" applies to all text pieces.
+
+        Returns {block_node_id, title_node_id, subtitle_node_id,
+        divider_node_id, body_node_id}; None for absent pieces.
+        """
+        return sb.add_styled_text_block(scene_path, parent_node_id, title,
+                                        subtitle, body, width, show_divider,
+                                        align)
+
+    # ---------------- Responsive helpers ----------------
+
+    @mcp.tool()
+    def cocos_make_fullscreen(scene_path: str, node_id: int) -> int:
+        """Attach cc.Widget so the node stretches to fill its parent.
+
+        Use for backgrounds, modal backdrops, full-bleed panels. Replaces
+        the ``align_flags=15`` incantation (top+bottom+left+right bitmask).
+        Returns the Widget component id.
+        """
+        return sb.make_fullscreen(scene_path, node_id)
+
+    @mcp.tool()
+    def cocos_anchor_to_edge(scene_path: str, node_id: int,
+                             edge: str, margin: int = 0) -> int:
+        """Pin node to an edge / corner of its parent via cc.Widget.
+
+        ``edge``: ``top`` / ``bottom`` / ``left`` / ``right`` /
+        ``top-left`` / ``top-right`` / ``bottom-left`` / ``bottom-right``.
+        ``margin``: distance from the edge (from both edges for corners).
+        Returns the Widget component id.
+        """
+        return sb.anchor_to_edge(scene_path, node_id, edge, margin)
+
+    @mcp.tool()
+    def cocos_center_in_parent(scene_path: str, node_id: int,
+                               horizontal: bool = True,
+                               vertical: bool = True) -> int:
+        """Attach cc.Widget with centering flags on either/both axes.
+
+        ``horizontal=False`` centers only vertically, and vice versa.
+        Returns the Widget component id.
+        """
+        return sb.center_in_parent(scene_path, node_id, horizontal, vertical)
+
+    @mcp.tool()
+    def cocos_stack_vertically(scene_path: str, node_id: int,
+                               spacing: str | int = "md",
+                               padding: str | int = "lg",
+                               align: str = "center") -> int:
+        """cc.Layout type=VERTICAL — children arrange top-to-bottom.
+
+        ``spacing`` / ``padding`` accept a design-token name
+        (``xs``/``sm``/``md``/``lg``/``xl``) or a raw int in logical
+        pixels. ``align``: ``left``/``center``/``right``.
+        Returns the Layout component id.
+        """
+        return sb.stack_vertically(scene_path, node_id, spacing, padding, align)
+
+    @mcp.tool()
+    def cocos_stack_horizontally(scene_path: str, node_id: int,
+                                 spacing: str | int = "md",
+                                 padding: str | int = "lg",
+                                 align: str = "top") -> int:
+        """cc.Layout type=HORIZONTAL — children arrange left-to-right.
+
+        ``align`` here is the cross-axis: ``top``/``center``/``bottom``.
+        Returns the Layout component id.
+        """
+        return sb.stack_horizontally(scene_path, node_id, spacing, padding, align)
+
+    @mcp.tool()
     def cocos_add_card_grid(scene_path: str, parent_node_id: int,
                             cards: list[dict],
                             columns: int = 3,

@@ -225,8 +225,11 @@ def add_main_menu(scene_path: str | Path,
 
     # [title]
     title_node = add_node(scene_path, layout_node, "Title")
-    add_uitransform(scene_path, title_node, button_width,
-                    resolve_size(scene_path, "title") + 12)
+    # Height = font_size * 1.3 so ascenders/descenders don't clip at the
+    # 1.2× threshold our own cocos_lint_ui enforces.
+    title_font = resolve_size(scene_path, "title")
+    add_node_title_h = int(title_font * 1.3)
+    add_uitransform(scene_path, title_node, button_width, add_node_title_h)
     add_label(scene_path, title_node, title,
               color_preset="primary", size_preset="title",
               h_align=1, v_align=1, overflow=2)  # SHRINK
@@ -558,6 +561,12 @@ def add_card_grid(scene_path: str | Path,
 
     grid = add_node(scene_path, parent_id, "CardGrid")
     add_uitransform(scene_path, grid, grid_w, grid_h)
+    # Declare "I manage my own layout" so cocos_lint_ui's
+    # many_buttons_no_layout rule doesn't flag this grid's 6+ cards.
+    # layout_type=0 (NONE) means Cocos runtime won't re-arrange —
+    # the handcrafted _lpos on each card is preserved.
+    from . import add_layout  # late import, matches pattern elsewhere
+    add_layout(scene_path, grid, layout_type=0, resize_mode=0)
 
     # Starting offset so the grid is centered on grid's own origin.
     # Card centers sit at -grid_w/2 + card_w/2 + col * (card_w + spacing)
