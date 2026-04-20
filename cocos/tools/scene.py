@@ -336,6 +336,39 @@ def register(mcp: FastMCP) -> None:
         return sb.instantiate_prefab(scene_path, parent_id, prefab_path,
                                      name=name, lpos=lpos, lscale=lscale)
 
+    @mcp.tool()
+    def cocos_save_subtree_as_prefab(scene_path: str,
+                                     root_node_id: int,
+                                     prefab_path: str,
+                                     prefab_uuid: str | None = None) -> dict:
+        """Extract a fully-configured scene subtree into a reusable .prefab.
+
+        The usual case: build your "Enemy" in a scratch scene with
+        Sprite + RigidBody2D + Collider + Animation + script all wired,
+        then save-as-prefab to spawn dozens. Without this, every copy
+        requires re-running the same ``add_*`` stack against a new node.
+
+        Self-contained rule: every cc.Node referenced from inside the
+        subtree (script field pointing at another Node, Button target,
+        etc.) must already BE inside the subtree. External cc.Node
+        refs raise with a message naming the offender — Cocos's prefab
+        format has no way to express late-bound cross-scene refs, so
+        silent clipping would produce a broken prefab. Asset UUID refs
+        (``{__uuid__: ...}`` for SpriteFrames, clips, meshes, other
+        prefabs) survive unchanged; those travel through the asset DB.
+
+        Effects on ``scene_path``: NONE (read-only). If you want the
+        scene to now use an instance instead of the raw subtree:
+        delete the source node, then ``cocos_instantiate_prefab`` the
+        fresh prefab. That's a deliberately-explicit two-step so you
+        don't lose the raw subtree on a misfired single call.
+
+        Returns {prefab_path, prefab_uuid, root_node_id (=1),
+        object_count, source_root_name}.
+        """
+        return sb.save_subtree_as_prefab(scene_path, root_node_id,
+                                         prefab_path, prefab_uuid)
+
     # ---------------- Scene globals: ambient / skybox / shadows ----------------
 
     @mcp.tool()

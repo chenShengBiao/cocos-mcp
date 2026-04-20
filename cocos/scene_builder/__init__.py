@@ -190,6 +190,7 @@ from .prefab import (
     _shift_id_refs,
     create_prefab,
     instantiate_prefab,
+    save_subtree_as_prefab,
 )
 from .ui import (
     PAGE_INDICATOR_HORIZONTAL,
