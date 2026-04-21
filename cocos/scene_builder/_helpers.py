@@ -308,7 +308,7 @@ def _ensure_node_prefab_info(s: list, node_id: int, fileid: str | None = None) -
     overrides against the authoring .prefab. A node left with ``_prefab: null``
     (the default ``_make_node`` shape, correct for scene nodes) becomes
     malformed inside a prefab and may refuse to instantiate or silently
-    lose overrides depending on engine version. See dogfood-flappy Bug B.
+    lose overrides depending on engine version.
 
     Idempotent: if the node already points at a valid PrefabInfo, the
     existing index is returned. Otherwise a fresh PrefabInfo is appended

@@ -1,10 +1,10 @@
 """MCP tool registrations for cross-cutting composites.
 
-Each tool here wraps a multi-step sequence that agents ran over and
-over during the dogfood run — ``add_script`` → ``compress_uuid`` →
-scene-level ``add_script`` being the clearest case. Surfacing them
-directly as single MCP tools cuts per-operation bookkeeping roughly
-in half on any non-trivial scene.
+Each tool here wraps a multi-step sequence that appears repeatedly in
+typical workflows — ``add_script`` → ``compress_uuid`` → scene-level
+``add_script`` being the clearest case. Surfacing them directly as
+single MCP tools cuts per-operation bookkeeping roughly in half on any
+non-trivial scene.
 
 The implementation lives in ``cocos.composites`` so it's importable
 from plain Python (tests, callers that don't spin up an MCP server),
@@ -56,7 +56,8 @@ def register(mcp: FastMCP) -> None:
           ``{"__uuid__": "..."}`` for asset refs.
         * ``uuid`` — optional override for the .ts.meta UUID. Omit to
           let the underlying ``add_script`` preserve an existing UUID
-          on overwrite (Bug A fix) or mint a fresh one on first write.
+          on overwrite (idempotent mode) or mint a fresh one on first
+          write.
 
         Returns::
 
@@ -143,8 +144,8 @@ def register(mcp: FastMCP) -> None:
                                     click_events: list[dict] | None = None) -> dict:
         """Create a button node with a child Label in one call.
 
-        The single most-repeated UI sequence in the dogfood run —
-        every menu had 2-4 buttons, each needing:
+        The most common UI primitive — menus typically have 2-4
+        buttons, each requiring:
 
             btn_node = cocos_create_node(scene, parent, name, ...)
             cocos_add_uitransform(scene, btn_node, W, H)

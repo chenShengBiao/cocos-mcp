@@ -149,9 +149,10 @@ def test_audio_controller_persists_to_localstorage(tmp_path: Path):
 
 
 def test_audio_controller_idempotent_recall_preserves_uuid(tmp_path: Path):
-    """Bug A fix: re-scaffolding preserves the UUID so the caller can
-    regenerate the file (e.g. after tweaking a constant in the source
-    template) without breaking any already-attached scene components."""
+    """Idempotent regeneration: re-scaffolding preserves the UUID so the
+    caller can regenerate the file (e.g. after tweaking a constant in
+    the source template) without breaking any already-attached scene
+    components."""
     proj = _make_project(tmp_path)
     first = scaffold_audio_controller(str(proj))
     second = scaffold_audio_controller(str(proj))

@@ -364,7 +364,9 @@ def add_node(scene_path: str | Path, parent_id: int, name: str,
     When ``scene_path`` points at a ``.prefab`` file, the new node also
     gets its own ``cc.PrefabInfo`` entry (fresh ``fileId``) appended and
     wired via ``_prefab``. Required for the prefab to instantiate cleanly
-    at runtime — see dogfood-flappy Bug B.
+    at runtime — without per-node PrefabInfo, Creator can't reconcile
+    per-instance overrides and child nodes may silently drop at
+    instantiation.
     """
     s = _load_scene(scene_path)
     if parent_id < 0 or parent_id >= len(s):
@@ -580,9 +582,9 @@ def validate_scene(scene_path: str | Path) -> ValidationResult:
     Prefab files (``.prefab`` suffix) skip the Canvas/UITransform-
     ancestry checks: a prefab's root has ``_parent: None`` by design,
     so the ancestor walk never reaches a Canvas even when the prefab
-    is perfectly valid for instantiation. The dogfood report called
-    this out as a MEDIUM — the old behavior flagged every prefab with
-    a UI node as "malformed", drowning real issues in false positives.
+    is perfectly valid for instantiation. Without this skip, every
+    prefab containing a UI node would get flagged as "malformed",
+    drowning real issues in false positives.
     """
     s = _load_scene(scene_path)
     is_prefab = str(scene_path).endswith(".prefab")

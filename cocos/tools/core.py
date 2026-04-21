@@ -308,12 +308,11 @@ def register(mcp: FastMCP) -> None:
                          category: str | None = None) -> dict:
         """List the tools actually registered on this MCP server.
 
-        Solves the stale-catalog problem the dogfood run ran into: a
-        subagent's MCP session can't reliably see tools registered
-        after the session started, so asking the server directly is
-        the ground truth. Returns ``{count, tools: [{name, category,
-        summary}, ...]}`` where ``summary`` is the first non-empty
-        line of the docstring.
+        Addresses stale-catalog scenarios where a subagent's MCP
+        session can't reliably see tools registered after the session
+        started — asking the server directly is the ground truth.
+        Returns ``{count, tools: [{name, category, summary}, ...]}``
+        where ``summary`` is the first non-empty line of the docstring.
 
         Filters (all optional):
 

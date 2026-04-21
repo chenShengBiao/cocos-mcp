@@ -145,9 +145,9 @@ def test_camera_follow_bounds_clamp(tmp_path: Path):
 
 
 def test_camera_follow_idempotent_recall_preserves_uuid(tmp_path: Path):
-    """Bug A fix: re-scaffolding preserves the UUID so Camera nodes that
-    already reference this script by compressed UUID keep resolving
-    after the file is overwritten."""
+    """Idempotent regeneration: re-scaffolding preserves the UUID so
+    Camera nodes that already reference this script by compressed UUID
+    keep resolving after the file is overwritten."""
     proj = _make_project(tmp_path)
     first = scaffold_camera_follow(str(proj))
     second = scaffold_camera_follow(str(proj))

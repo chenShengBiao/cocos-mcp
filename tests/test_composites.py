@@ -1,13 +1,13 @@
 """Tests for cocos.composites — the single-call shorthands that fold
-multi-step dogfood sequences into one tool.
+multi-step sequences into one tool.
 
 Each composite should behave exactly as the equivalent primitive
 sequence, returning both halves of what the caller needs (script uuid +
 attached component id in the case of ``add_and_attach_script``). The
-interesting regressions are around the Bug A interaction (overwriting
-an existing script via the composite shouldn't mint a new UUID) and
-the Bug B interaction (attaching to a ``.prefab`` node should produce
-a valid prefab).
+interesting regressions are the script-UUID idempotency path
+(overwriting an existing script via the composite must not mint a new
+UUID) and the prefab-aware path (attaching to a ``.prefab`` node must
+produce a valid prefab).
 """
 from __future__ import annotations
 
@@ -101,10 +101,10 @@ def test_add_and_attach_script_forwards_props(tmp_path: Path):
 
 
 def test_add_and_attach_script_idempotent_on_rewrite(tmp_path: Path):
-    """Bug A via the composite: overwriting the source preserves the
-    UUID, so the scene's attached component still resolves. Prior to
-    the Bug A fix, the second call would have silently rewritten
-    <uuid>.meta to a new value, breaking the first call's attachment."""
+    """Idempotency via the composite: overwriting the source preserves
+    the UUID, so the scene's attached component still resolves. Without
+    preservation, the second call would silently rewrite <uuid>.meta to
+    a new value, breaking the first call's attachment."""
     proj = _make_project(tmp_path)
     scene, info = _make_scene(tmp_path)
     node = sb.add_node(scene, info["canvas_node_id"], "Foo")
@@ -131,12 +131,11 @@ def test_add_and_attach_script_idempotent_on_rewrite(tmp_path: Path):
 
 
 def test_add_and_attach_script_on_prefab_writes_prefab_info(tmp_path: Path):
-    """Bug B interaction: attaching a script onto a node inside a
-    ``.prefab`` is the combined-Bug-B path — the composite invokes
-    scene_builder.add_script, which uses _attach_component (not
-    add_node), so PrefabInfo wiring for a fresh child node is the
-    caller's responsibility. But attaching onto an already-valid
-    prefab node must not break the prefab's structure.
+    """Prefab-aware path: attaching a script onto a node inside a
+    ``.prefab`` goes through scene_builder.add_script, which uses
+    _attach_component (not add_node), so PrefabInfo wiring for a fresh
+    child node is the caller's responsibility. But attaching onto an
+    already-valid prefab node must not break the prefab's structure.
     """
     proj = _make_project(tmp_path)
     prefab = tmp_path / "Pipe.prefab"

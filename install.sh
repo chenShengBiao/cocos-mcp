@@ -35,6 +35,6 @@ claude mcp remove cocos-mcp -s user 2>/dev/null || true
 claude mcp add -s user cocos-mcp -- bash "$INSTALL_DIR/run.sh"
 
 echo ""
-echo "✓ cocos-mcp 安装完成（90+ 个工具）"
+echo "✓ cocos-mcp 安装完成（184 个工具）"
 echo "  重启 Claude Code 即可使用"
 echo "  试试说：「做一个贪吃蛇游戏」"

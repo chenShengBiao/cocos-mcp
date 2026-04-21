@@ -58,12 +58,11 @@ def test_add_script_appends_ts_extension(tmp_path: Path):
 
 
 def test_add_script_idempotent_preserves_uuid_on_overwrite(tmp_path: Path):
-    """Bug A regression: rewriting the same .ts path must NOT mint a new
-    UUID. Scenes reference scripts by compressed UUID, so a silent
-    reassignment on every source edit broke every attached component.
-    Dogfood-flappy report surfaced this — agents normally re-run
-    ``add_script`` to patch in a new field and expect the script to keep
-    working.
+    """Idempotent-UUID regression: rewriting the same .ts path must NOT
+    mint a new UUID. Scenes reference scripts by compressed UUID, so a
+    silent reassignment on every source edit would break every attached
+    component. Typical workflow is to re-run ``add_script`` to patch in
+    a new field and expect the script to keep working.
     """
     proj = _make_project_skeleton(tmp_path / "p")
     first = cp.add_script(str(proj), "Foo", "export class Foo { a = 1; }")

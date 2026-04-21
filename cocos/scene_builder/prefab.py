@@ -342,9 +342,11 @@ def save_subtree_as_prefab(scene_path: str | Path,
     # after the cc.Prefab asset wrapper.
     #
     # Every cc.Node inside the prefab needs its own cc.PrefabInfo with a
-    # unique fileId (dogfood-flappy Bug B). We emit one PrefabInfo per
-    # cloned cc.Node, pack them contiguously after the cloned region,
-    # and wire each node's _prefab field to its matching PrefabInfo index.
+    # unique fileId — Creator uses those ids to reconcile per-instance
+    # overrides at instantiation time; without one per node, child
+    # overrides silently drop. We emit one PrefabInfo per cloned
+    # cc.Node, pack them contiguously after the cloned region, and wire
+    # each node's _prefab field to its matching PrefabInfo index.
     new_prefab_uuid = prefab_uuid or new_uuid()
     root_name = cloned[0].get("_name") or "Prefab"
     cloned[0]["_parent"] = None           # prefab root has no parent

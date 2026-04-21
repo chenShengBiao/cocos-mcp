@@ -62,11 +62,11 @@ def add_script(project_path: str | Path, rel_path: str, source: str,
     Idempotent on overwrite: if a ``.ts.meta`` already exists at the
     target path AND the caller didn't pass an explicit ``uuid=``, we
     preserve the existing UUID so any scene/prefab already referencing
-    this script's compressed form keeps resolving. Prior releases
-    silently minted a new UUID on overwrite and broke every reference
-    — a real bug the first dogfood run surfaced. Passing ``uuid=`` now
-    still lets callers force a new identity when they genuinely want
-    to fork the asset.
+    this script's compressed form keeps resolving. Without preservation,
+    overwriting a ``.ts.meta`` would mint a fresh UUID and silently leave
+    every scene/prefab referencing the old compressed form with a dead
+    component. Passing ``uuid=`` still lets callers force a new identity
+    when they genuinely want to fork the asset.
 
     Returns ``{path, rel_path, uuid, created}`` where ``created`` is
     True when we wrote a fresh .ts.meta and False when we preserved an

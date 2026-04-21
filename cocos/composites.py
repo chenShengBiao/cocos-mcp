@@ -2,11 +2,11 @@
 
 Every function here is a pure wrapper over the per-layer primitives
 (``cocos.project``, ``cocos.scene_builder``, ``cocos.uuid_util``). They
-exist because the dogfood run showed the same 3–4-call dance repeated
-for every script attached, every UI button created, every physics body
-wired — enough that the bookkeeping drift (forgetting to compress a
-UUID, losing track of which id belongs to which node, re-saving the
-wrong scene path) became the dominant source of agent error.
+exist because three multi-call sequences recur across typical workflows
+— script + attach, rigidbody + collider, button + label — and the
+bookkeeping drift they induce (forgetting to compress a UUID, losing
+track of which id belongs to which node, re-saving the wrong scene
+path) is a dominant source of agent error.
 
 Keeping these functions in one module rather than scattered across the
 ``tools/*.py`` files lets ``test_composites.py`` exercise them without
@@ -31,7 +31,7 @@ def add_and_attach_script(project_path: str | Path,
                           uuid: str | None = None) -> dict:
     """Write a TS script + attach it to a scene node in one call.
 
-    Replaces the 3-step dance agents ran repeatedly on the dogfood run::
+    Replaces the 3-step dance callers otherwise repeat per script::
 
         r = cocos_add_script(project, "Foo", source)
         short = cocos_compress_uuid(r["uuid"])
@@ -59,7 +59,8 @@ def add_and_attach_script(project_path: str | Path,
       for asset refs; bare ints stay as ints.
     * ``uuid`` — optional override for the script's main UUID. When
       omitted and the .ts.meta already exists, the existing UUID is
-      preserved (see Bug A fix in ``project.assets.add_script``).
+      preserved — see the idempotency note in
+      ``project.assets.add_script``.
 
     Returns a dict with both forms of the script UUID so the caller can
     immediately reference it from other places (e.g. linking a second
@@ -116,9 +117,9 @@ def add_physics_body2d(scene_path: str | Path,
                        points: list[list[float]] | None = None) -> dict:
     """Attach a RigidBody2D + shape collider in one call.
 
-    The dogfood run had "RigidBody2D + Box/Circle/Polygon Collider" as
-    one of the most-repeated sequences — every Bird, every Pipe, every
-    Ground slab. This folds the 2 calls into 1 and returns both ids so
+    "RigidBody2D + Box/Circle/Polygon Collider" is the canonical
+    2D-physics attach pattern — effectively every dynamic/static body
+    needs both. This folds the 2 calls into 1 and returns both ids so
     the caller can immediately link them or set them as a joint target.
 
     Parameters:
@@ -209,8 +210,8 @@ def add_button_with_label(scene_path: str | Path,
                           transition: int = 2,
                           zoom_scale: float = 1.1,
                           click_events: list[dict] | None = None) -> dict:
-    """Create a button node with a child Label — the single most-
-    repeated UI sequence agents ran during the dogfood run.
+    """Create a button node with a child Label — the most common UI
+    primitive, composed of 6-7 underlying calls.
 
     Structurally produces::
 

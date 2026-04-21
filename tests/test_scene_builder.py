@@ -429,14 +429,13 @@ class TestBatchOps:
         assert isinstance(first, dict)
         assert "error" in first
 
-    # ------- direct/batch param parity (dogfood v2 follow-up) -------
+    # ------- direct/batch param parity regression -------
 
     def test_add_node_accepts_lpos_tuple_matching_direct_api(self):
-        """Batch add_node now accepts ``lpos=[x, y, z]`` — the same
-        tuple form ``sb.add_node`` takes. Pre-fix it only read
-        ``pos_x/y/z`` scalars; agents used to the direct API handed
-        over ``lpos`` and silently got (0, 0, 0). See dogfood-flappy
-        v2 report."""
+        """Batch add_node accepts ``lpos=[x, y, z]`` — the same tuple
+        form ``sb.add_node`` takes. Without this parity, callers
+        familiar with the direct API pass ``lpos`` and silently get
+        (0, 0, 0) positioning."""
         path, info = _tmp_scene()
         res = batch_ops(path, [
             {"op": "add_node", "parent_id": info["canvas_node_id"],
@@ -601,9 +600,9 @@ class TestValidation:
 
     def test_prefab_flags_missing_prefab_info(self, tmp_path):
         """A .prefab whose node is missing its cc.PrefabInfo (hand-
-        tampered, or produced by an old cocos-mcp pre-Bug-B) must be
-        caught — leaving it silent is what allowed Bug B to land in the
-        first place."""
+        tampered, or produced by an old prefab writer that didn't emit
+        per-node PrefabInfo) must be caught — leaving this silent lets
+        malformed prefabs land silently at instantiation time."""
         from cocos.scene_builder import create_prefab
         prefab = str(tmp_path / "Broken.prefab")
         info = create_prefab(prefab, root_name="Broken")
@@ -1058,10 +1057,10 @@ class TestNewComponents:
 
 
 # ========================================================================
-# Bug B regression: add_node on .prefab files must wire cc.PrefabInfo per
-# child. Dogfood-flappy surfaced this — children were written with
-# _prefab: null and no sibling PrefabInfo entry, leaving the prefab
-# structurally malformed for the Cocos runtime.
+# PrefabInfo regression: add_node on .prefab files must wire cc.PrefabInfo
+# per child. Without it, children get _prefab: null and no sibling
+# PrefabInfo entry, leaving the prefab structurally malformed for the
+# Cocos runtime at instantiation.
 # ========================================================================
 
 

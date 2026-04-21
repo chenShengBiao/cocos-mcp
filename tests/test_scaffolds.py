@@ -95,11 +95,11 @@ def test_scaffold_input_custom_rel_path(tmp_path: Path):
 
 
 def test_scaffold_input_idempotent_recall_preserves_uuid(tmp_path: Path):
-    """Regenerating the same scaffold must PRESERVE the UUID (Bug A fix) —
-    any scene that already references this script by compressed UUID keeps
-    resolving. Agents routinely re-run scaffolds after editing a parameter,
-    and the prior behavior (fresh UUID every call) silently broke every
-    attached component."""
+    """Regenerating the same scaffold must PRESERVE the UUID — any scene
+    that already references this script by compressed UUID keeps
+    resolving. Callers routinely re-run scaffolds after editing a
+    parameter; without UUID preservation, every attached component
+    would silently become a dead reference."""
     proj = _make_project(tmp_path)
     first = sc.scaffold_input_abstraction(str(proj))
     second = sc.scaffold_input_abstraction(str(proj))
@@ -175,8 +175,8 @@ def test_scaffold_score_custom_rel_path(tmp_path: Path):
 
 
 def test_scaffold_score_idempotent_recall_preserves_uuid(tmp_path: Path):
-    """Bug A fix: re-scaffolding over the same rel_path preserves the
-    UUID so attached scene components keep resolving."""
+    """Idempotent regeneration: re-scaffolding over the same rel_path
+    preserves the UUID so attached scene components keep resolving."""
     proj = _make_project(tmp_path)
     first = sc.scaffold_score_system(str(proj))
     second = sc.scaffold_score_system(str(proj))

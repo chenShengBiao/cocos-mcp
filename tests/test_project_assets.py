@@ -293,7 +293,7 @@ def test_enable_dynamic_atlas_custom_max_frame_size(tmp_path: Path):
 
 
 def test_enable_dynamic_atlas_preserves_uuid_on_rewrite(tmp_path: Path):
-    """Re-running the helper should preserve the meta UUID — same Bug A
+    """Re-running the helper should preserve the meta UUID — same
     idempotency guarantee as every other scaffold-style generator. If
     the UUID flips, every scene-attached instance goes no-op."""
     proj = _make_project(tmp_path)
