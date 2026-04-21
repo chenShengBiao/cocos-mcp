@@ -13,7 +13,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import build, core, media, physics_3d, physics_ui, rendering_3d, scene, ui_patterns
+from . import (
+    build,
+    core,
+    interact,
+    media,
+    physics_3d,
+    physics_ui,
+    rendering_3d,
+    scaffolds,
+    scene,
+    ui_patterns,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from mcp.server.fastmcp import FastMCP
@@ -21,11 +32,13 @@ if TYPE_CHECKING:  # pragma: no cover
 __all__ = [
     "build",
     "core",
+    "interact",
     "media",
     "physics_3d",
     "physics_ui",
     "register_all",
     "rendering_3d",
+    "scaffolds",
     "scene",
     "ui_patterns",
 ]
@@ -41,3 +54,5 @@ def register_all(mcp: FastMCP) -> None:
     media.register(mcp)
     ui_patterns.register(mcp)
     build.register(mcp)
+    interact.register(mcp)
+    scaffolds.register(mcp)
