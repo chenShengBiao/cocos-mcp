@@ -253,6 +253,42 @@ def register(mcp: FastMCP) -> None:
         return sb.validate_scene(scene_path)
 
     @mcp.tool()
+    def cocos_assert_scene_state(scene_path: str,
+                                 assertions: list[dict]) -> dict:
+        """Declarative expectations against a scene/prefab — regression-
+        test style.
+
+        Each entry in ``assertions``:
+
+          {"path": "<dotted>", "op": "<op>", "value": <expected>}
+
+        with optional root-finder shortcuts:
+
+          {"find_node_by_name": "Player",        # find first cc.Node _name
+           "path": "_lpos.x", "op": "gt", "value": 0}
+
+          {"find_component": {"type": "cc.Sprite",
+                              "on_node_named": "Enemy"},
+           "path": "_color.r", "op": "eq", "value": 255}
+
+        Ops: eq / ne / gt / ge / lt / le / in / not_in / contains /
+             match / is_null / not_null / type_is / exists / not_exists
+
+        Path syntax: ``_children[0].__id__`` / ``15._lpos.x``.
+        First dotted segment as int + root is list → list index.
+        ``[N]`` always list index. Missing path → LookupError surfaces
+        as a failed assertion (or passes if op=not_exists).
+
+        Runs EVERY assertion even if earlier ones fail — regression
+        checks want a full report, not a first-failure bail.
+
+        Returns {ok, scene_path, total, passed_count, failed_count,
+        passed: [...], failed: [...]}.
+        """
+        from cocos.asserts import assert_scene_state
+        return assert_scene_state(scene_path, assertions)
+
+    @mcp.tool()
     def cocos_lint_ui(scene_path: str) -> dict:
         """Non-structural UI quality check (complement to cocos_validate_scene).
 

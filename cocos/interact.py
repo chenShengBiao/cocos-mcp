@@ -258,8 +258,22 @@ def run_preview_sequence(url: str,
                 kind = action.get("kind", "?")
                 try:
                     result = _run_one(page, action)
-                    results.append({"kind": kind, "ok": True,
-                                    "result": result, "error": None})
+                    # ``assert`` returns a structured pass/fail — let its
+                    # ``passed`` flag propagate to the sequence-level ok,
+                    # otherwise a failed assertion would look like a
+                    # successful tool call.
+                    if kind == "assert" and isinstance(result, dict) and "passed" in result:
+                        ok = bool(result["passed"])
+                        err = result.get("error")
+                        if not ok and not err:
+                            err = (f"assertion failed: {result.get('op')} "
+                                   f"actual={result.get('actual')!r} "
+                                   f"expected={result.get('expected')!r}")
+                    else:
+                        ok = True
+                        err = None
+                    results.append({"kind": kind, "ok": ok,
+                                    "result": result, "error": err})
                 except Exception as e:
                     results.append({"kind": kind, "ok": False,
                                     "result": None, "error": str(e)})
@@ -310,6 +324,27 @@ def _run_one(page: Any, action: dict) -> dict | None:
         # bytes don't survive JSON round-trip through MCP, so we hex-encode.
         # Caller decodes with bytes.fromhex().
         return {"png_bytes_hex": png_bytes.hex()}
+    if kind == "assert":
+        # Evaluate the expression, compare against expected via shared
+        # asserts._check, return a structured pass/fail result. Using the
+        # same page/browser as the rest of the sequence is the whole point:
+        # runtime game state doesn't survive a reload, so assertions must
+        # ride the same session as the clicks that produced the state.
+        from .asserts import _check
+        expression = action["expression"]
+        op = action.get("op", "eq")
+        expected = action.get("value")
+        actual = page.evaluate(expression)
+        try:
+            passed = _check(actual, op, expected)
+        except Exception as e:
+            return {
+                "passed": False, "actual": actual, "expected": expected,
+                "op": op, "error": f"{op} check raised: {e}",
+            }
+        return {
+            "passed": passed, "actual": actual, "expected": expected, "op": op,
+        }
     raise ValueError(f"unknown action kind: {kind!r}")
 
 
