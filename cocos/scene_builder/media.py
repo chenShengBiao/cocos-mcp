@@ -37,12 +37,19 @@ def add_audio_source(scene_path: str | Path, node_id: int,
                      clip_uuid: str | None = None,
                      play_on_awake: bool = False, loop: bool = False,
                      volume: float = 1.0) -> int:
-    """Attach cc.AudioSource."""
+    """Attach cc.AudioSource.
+
+    Engine source (audio/audio-source.ts) serializes every setting as a
+    protected underscore-prefixed field — ``_clip`` / ``_loop`` /
+    ``_playOnAwake`` / ``_volume``. Pre-audit we wrote ``loop`` /
+    ``playOnAwake`` / ``volume`` (no prefix) and every AudioSource
+    ran with engine defaults regardless of caller config.
+    """
     from cocos.scene_builder import add_component
     props: dict[str, Any] = {
-        "playOnAwake": play_on_awake,
-        "loop": loop,
-        "volume": volume,
+        "_playOnAwake": play_on_awake,
+        "_loop": loop,
+        "_volume": volume,
     }
     if clip_uuid:
         props["_clip"] = {"__uuid__": clip_uuid}

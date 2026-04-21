@@ -127,7 +127,8 @@ def test_toast_starts_invisible(tmp_path: Path):
     scene, info = _scene_in_project(proj)
     res = sb.add_toast(scene, info["canvas_node_id"], "x")
     opacity = _component_on(scene, res["toast_node_id"], "cc.UIOpacity")
-    assert opacity["opacity"] == 0
+    # UIOpacity.opacity → _opacity backing field (protected).
+    assert opacity["_opacity"] == 0
 
 
 def test_toast_validates_scene(tmp_path: Path):

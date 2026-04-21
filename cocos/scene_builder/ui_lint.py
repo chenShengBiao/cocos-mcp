@@ -118,10 +118,12 @@ def _nearest_bg_color(scene: list, node_id: int) -> dict | None:
     while cur is not None and depth < 12:  # finite guard against cycles
         btn = _find_button_on_node(scene, cur)
         if btn is not None:
-            # _N$normalColor is the serialized fill color used when
+            # _normalColor is the serialized fill color used when
             # transition=COLOR; for SCALE transition the value still
-            # exists and represents the intended fill at rest.
-            nc = btn.get("_N$normalColor")
+            # exists and represents the intended fill at rest. The
+            # ``_N$`` 2.x-mangled alias stays as a read-compat fallback
+            # for scenes authored by older cocos-mcp builds.
+            nc = btn.get("_normalColor") or btn.get("_N$normalColor")
             if isinstance(nc, dict):
                 return nc
         sprite = _find_sprite_on_node(scene, cur)
@@ -250,8 +252,13 @@ def lint_ui(scene_path: str | Path) -> dict:
 
         # ---- Rule: label with overflow=NONE risks clipping ----
         if label_cmp is not None:
-            # Serialized field name: _N$overflow (Cocos convention) or overflow.
-            overflow = label_cmp.get("_N$overflow", label_cmp.get("overflow", 0))
+            # Cocos 3.8 Label serializes protected backing fields with
+            # underscore prefix (``_overflow``, ``_enableWrapText``,
+            # ``_string``). The ``_N$``-mangled + bare-name forms are
+            # tolerated as read-compat fallbacks for legacy scenes.
+            overflow = label_cmp.get("_overflow",
+                                     label_cmp.get("_N$overflow",
+                                                   label_cmp.get("overflow", 0)))
             enable_wrap = label_cmp.get("_enableWrapText",
                                         label_cmp.get("enableWrapText", False))
             text_length = len(label_cmp.get("_string", label_cmp.get("string", "")))

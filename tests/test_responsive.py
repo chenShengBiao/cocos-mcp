@@ -237,7 +237,7 @@ def test_stack_vertically_attaches_layout_type_2(tmp_path: Path):
     assert lay["__type__"] == "cc.Layout"
     assert lay["_layoutType"] == 2
     # default align="center" → h_direction=2 (CENTER_HORIZONTAL)
-    assert lay["_N$horizontalDirection"] == 2
+    assert lay["_horizontalDirection"] == 2
     # resize_mode=1 (CONTAINER) — container grows to fit children
     assert lay["_resizeMode"] == 1
 
@@ -252,12 +252,12 @@ def test_stack_vertically_token_spacing_from_dark_game_theme(tmp_path: Path):
     cid = rsp.stack_vertically(scene, n, spacing="md", padding="sm")
 
     lay = _raw_component(scene, cid)
-    assert lay["_N$spacingY"] == 16
+    assert lay["_spacingY"] == 16
     # All four padding edges get the same value
-    assert lay["_N$paddingTop"] == 8
-    assert lay["_N$paddingBottom"] == 8
-    assert lay["_N$paddingLeft"] == 8
-    assert lay["_N$paddingRight"] == 8
+    assert lay["_paddingTop"] == 8
+    assert lay["_paddingBottom"] == 8
+    assert lay["_paddingLeft"] == 8
+    assert lay["_paddingRight"] == 8
 
 
 def test_stack_vertically_int_mode_passes_through(tmp_path: Path):
@@ -269,11 +269,11 @@ def test_stack_vertically_int_mode_passes_through(tmp_path: Path):
     cid = rsp.stack_vertically(scene, n, spacing=30, padding=10)
 
     lay = _raw_component(scene, cid)
-    assert lay["_N$spacingY"] == 30
-    assert lay["_N$paddingTop"] == 10
-    assert lay["_N$paddingBottom"] == 10
-    assert lay["_N$paddingLeft"] == 10
-    assert lay["_N$paddingRight"] == 10
+    assert lay["_spacingY"] == 30
+    assert lay["_paddingTop"] == 10
+    assert lay["_paddingBottom"] == 10
+    assert lay["_paddingLeft"] == 10
+    assert lay["_paddingRight"] == 10
 
 
 @pytest.mark.parametrize("align,expected_h_dir", [
@@ -289,7 +289,7 @@ def test_stack_vertically_align_mapping(tmp_path: Path, align, expected_h_dir):
     cid = rsp.stack_vertically(scene, n, align=align)
 
     lay = _raw_component(scene, cid)
-    assert lay["_N$horizontalDirection"] == expected_h_dir
+    assert lay["_horizontalDirection"] == expected_h_dir
 
 
 def test_stack_vertically_rejects_bad_align(tmp_path: Path):
@@ -357,11 +357,11 @@ def test_stack_horizontally_token_padding(tmp_path: Path):
     cid = rsp.stack_horizontally(scene, n, spacing="md", padding="lg")
 
     lay = _raw_component(scene, cid)
-    assert lay["_N$spacingX"] == 16  # md
-    assert lay["_N$paddingTop"] == 32
-    assert lay["_N$paddingBottom"] == 32
-    assert lay["_N$paddingLeft"] == 32
-    assert lay["_N$paddingRight"] == 32
+    assert lay["_spacingX"] == 16  # md
+    assert lay["_paddingTop"] == 32
+    assert lay["_paddingBottom"] == 32
+    assert lay["_paddingLeft"] == 32
+    assert lay["_paddingRight"] == 32
 
 
 @pytest.mark.parametrize("align,expected_v_dir", [
@@ -377,7 +377,7 @@ def test_stack_horizontally_align_mapping(tmp_path: Path, align, expected_v_dir)
     cid = rsp.stack_horizontally(scene, n, align=align)
 
     lay = _raw_component(scene, cid)
-    assert lay["_N$verticalDirection"] == expected_v_dir
+    assert lay["_verticalDirection"] == expected_v_dir
 
 
 def test_stack_horizontally_rejects_bad_align(tmp_path: Path):
@@ -396,9 +396,9 @@ def test_stack_horizontally_int_mode(tmp_path: Path):
     cid = rsp.stack_horizontally(scene, n, spacing=12, padding=24)
 
     lay = _raw_component(scene, cid)
-    assert lay["_N$spacingX"] == 12
-    assert lay["_N$paddingTop"] == 24
-    assert lay["_N$paddingLeft"] == 24
+    assert lay["_spacingX"] == 12
+    assert lay["_paddingTop"] == 24
+    assert lay["_paddingLeft"] == 24
 
 
 def test_stack_horizontally_validates_scene(tmp_path: Path):

@@ -247,13 +247,18 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
 
             elif action == "add_button":
                 nid = op["node_id"]
+                # Field names mirror engine button.ts — protected
+                # backing fields take the underscore prefix. See ui.py
+                # for the full drift fix note.
                 obj = {
                     "__type__": "cc.Button", "_name": "", "_objFlags": 0,
                     "node": _ref(nid), "_enabled": True, "__prefab": None,
                     "_id": _nid("btn"),
-                    "transition": op.get("transition", 2),
-                    "zoomScale": op.get("zoom_scale", 1.1),
-                    "duration": 0.1, "_interactable": True, "clickEvents": [],
+                    "clickEvents": [],
+                    "_interactable": True,
+                    "_transition": op.get("transition", 2),
+                    "_zoomScale": op.get("zoom_scale", 1.1),
+                    "_duration": 0.1,
                 }
                 cid = _attach_component(s, nid, obj)
                 results.append(cid)
@@ -328,40 +333,45 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 results.append(cid)
 
             elif action == "add_layout":
+                # Cocos 3.8 uses plain underscore prefix on Layout's
+                # protected fields; the ``_N$`` mangling was 2.x-only
+                # and the engine silently drops 2.x keys.
                 nid = op["node_id"]
                 cid = _attach_component(s, nid, _make_generic(nid, "cc.Layout", "lay", {
                     "_layoutType": op.get("layout_type", 1),
                     "_resizeMode": op.get("resize_mode", 1),
-                    "_N$spacingX": op.get("spacing_x", 0),
-                    "_N$spacingY": op.get("spacing_y", 0),
-                    "_N$paddingTop": op.get("padding_top", 0),
-                    "_N$paddingBottom": op.get("padding_bottom", 0),
-                    "_N$paddingLeft": op.get("padding_left", 0),
-                    "_N$paddingRight": op.get("padding_right", 0),
-                    "_N$horizontalDirection": op.get("h_direction", 0),
-                    "_N$verticalDirection": op.get("v_direction", 1),
+                    "_spacingX": op.get("spacing_x", 0),
+                    "_spacingY": op.get("spacing_y", 0),
+                    "_paddingTop": op.get("padding_top", 0),
+                    "_paddingBottom": op.get("padding_bottom", 0),
+                    "_paddingLeft": op.get("padding_left", 0),
+                    "_paddingRight": op.get("padding_right", 0),
+                    "_horizontalDirection": op.get("h_direction", 0),
+                    "_verticalDirection": op.get("v_direction", 1),
                 }))
                 results.append(cid)
 
             elif action == "add_progress_bar":
                 nid = op["node_id"]
                 props = {
-                    "mode": op.get("mode", 0),
-                    "totalLength": op.get("total_length", 100),
-                    "progress": op.get("progress", 1.0),
-                    "reverse": op.get("reverse", False),
+                    "_mode": op.get("mode", 0),
+                    "_totalLength": op.get("total_length", 100),
+                    "_progress": op.get("progress", 1.0),
+                    "_reverse": op.get("reverse", False),
                 }
                 if op.get("bar_sprite_id") is not None:
-                    props["_N$barSprite"] = _ref(op["bar_sprite_id"])
+                    props["_barSprite"] = _ref(op["bar_sprite_id"])
                 cid = _attach_component(s, nid, _make_generic(nid, "cc.ProgressBar", "pgb", props))
                 results.append(cid)
 
             elif action == "add_audio_source":
                 nid = op["node_id"]
+                # AudioSource fields are all protected underscore-
+                # prefixed in engine 3.8 — see media.py.
                 props = {
-                    "playOnAwake": op.get("play_on_awake", False),
-                    "loop": op.get("loop", False),
-                    "volume": op.get("volume", 1.0),
+                    "_playOnAwake": op.get("play_on_awake", False),
+                    "_loop": op.get("loop", False),
+                    "_volume": op.get("volume", 1.0),
                 }
                 if op.get("clip_uuid"):
                     props["_clip"] = {"__uuid__": op["clip_uuid"]}
@@ -392,13 +402,15 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
 
             elif action == "add_richtext":
                 nid = op["node_id"]
+                # RichText fields are all protected underscore-prefixed
+                # in engine 3.8 — see ui.py.
                 cid = _attach_component(s, nid, _make_generic(nid, "cc.RichText", "rtx", {
                     "_lineHeight": op.get("line_height", 40),
-                    "string": op.get("text", "<b>Hello</b>"),
-                    "fontSize": op.get("font_size", 40),
-                    "maxWidth": op.get("max_width", 0),
-                    "horizontalAlign": op.get("horizontal_align", 0),
-                    "handleTouchEvent": True,
+                    "_string": op.get("text", "<b>Hello</b>"),
+                    "_fontSize": op.get("font_size", 40),
+                    "_maxWidth": op.get("max_width", 0),
+                    "_horizontalAlign": op.get("horizontal_align", 0),
+                    "_handleTouchEvent": True,
                 }))
                 results.append(cid)
 

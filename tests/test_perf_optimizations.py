@@ -84,10 +84,11 @@ def test_batch_add_widget_layout_progress():
         s = json.load(f)
     types = [s[r].get("__type__") for r in res["results"][1:]]
     assert types == ["cc.UITransform", "cc.Widget", "cc.Layout", "cc.ProgressBar"]
-    # progress bar fields wired correctly
+    # progress bar fields wired correctly — engine stores as _progress /
+    # _totalLength (protected backing fields).
     pgb = s[res["results"][4]]
-    assert pgb["progress"] == 0.5
-    assert pgb["totalLength"] == 200
+    assert pgb["_progress"] == 0.5
+    assert pgb["_totalLength"] == 200
 
 
 def test_batch_add_audio_animation_camera_mask_richtext():
@@ -108,12 +109,15 @@ def test_batch_add_audio_animation_camera_mask_richtext():
 
     with open(path) as f:
         s = json.load(f)
-    assert s[res["results"][1]]["volume"] == 0.7
-    assert s[res["results"][1]]["loop"] is True
-    assert s[res["results"][3]]["playOnLoad"] is False
+    # Engine 3.8 serializes AudioSource / RichText with underscore-
+    # prefixed backing fields. Animation.playOnLoad is a public field —
+    # stays bare.
+    assert s[res["results"][1]]["_volume"] == 0.7
+    assert s[res["results"][1]]["_loop"] is True
+    assert s[res["results"][3]]["playOnLoad"] is False  # public @serializable
     assert s[res["results"][5]]["_orthoHeight"] == 480
     assert s[res["results"][7]]["_type"] == 1
-    assert s[res["results"][9]]["string"] == "<color=red>X</color>"
+    assert s[res["results"][9]]["_string"] == "<color=red>X</color>"
 
 
 def test_batch_set_scale_rotation_layer_uuid_property():

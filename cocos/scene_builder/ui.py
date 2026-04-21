@@ -151,21 +151,26 @@ def add_button(scene_path: str | Path, node_id: int,
             s.append(evt)
             serialized_events.append(_ref(len(s) - 1))
 
+    # Cocos 3.8 serializes Button's getter/setter fields under their
+    # underscore-prefixed backing names (see button.ts). Pre-audit we
+    # wrote `transition`/`zoomScale`/`duration` and Cocos 2.x `_N$` prefixed
+    # colors — all silently dropped at deserialization, so every button
+    # ran with engine defaults (SCALE transition, 1.2× zoom, white colors).
     obj = {
         "__type__": "cc.Button",
         "_name": "", "_objFlags": 0,
         "node": _ref(node_id), "_enabled": True, "__prefab": None,
         "_id": _nid("btn"),
         "target": _ref(node_id),  # target = self node (required for SCALE transition)
-        "transition": transition,
-        "zoomScale": zoom_scale,
-        "_N$normalColor": _color(*normal_color),
-        "_N$hoverColor": _color(*hover_color),
-        "pressedColor": _color(*pressed_color),
-        "_N$disabledColor": _color(*disabled_color),
-        "duration": 0.1,
+        "clickEvents": serialized_events,  # public @serializable — bare name
         "_interactable": True,
-        "clickEvents": serialized_events,
+        "_transition": transition,
+        "_zoomScale": zoom_scale,
+        "_duration": 0.1,
+        "_normalColor": _color(*normal_color),
+        "_hoverColor": _color(*hover_color),
+        "_pressedColor": _color(*pressed_color),
+        "_disabledColor": _color(*disabled_color),
     }
     cid = _attach_component(s, node_id, obj)
     _save_scene(scene_path, s)
@@ -178,19 +183,26 @@ def add_layout(scene_path: str | Path, node_id: int,
                padding_left: float = 0, padding_right: float = 0,
                resize_mode: int = 1,
                h_direction: int = 0, v_direction: int = 1) -> int:
-    """Attach cc.Layout. layout_type: 0=NONE, 1=HORIZONTAL, 2=VERTICAL, 3=GRID."""
+    """Attach cc.Layout. layout_type: 0=NONE, 1=HORIZONTAL, 2=VERTICAL, 3=GRID.
+
+    Cocos 3.x serializes Layout's protected fields with a plain
+    underscore prefix; ``_N$`` was the 2.x-mangled form and is ignored
+    in 3.8. Pre-audit, this tool was emitting ``_N$`` keys and the
+    Layout ran with default spacing/padding/direction regardless of
+    the caller's config.
+    """
     from cocos.scene_builder import add_component
     return add_component(scene_path, node_id, "cc.Layout", {
         "_layoutType": layout_type,
         "_resizeMode": resize_mode,
-        "_N$spacingX": spacing_x,
-        "_N$spacingY": spacing_y,
-        "_N$paddingTop": padding_top,
-        "_N$paddingBottom": padding_bottom,
-        "_N$paddingLeft": padding_left,
-        "_N$paddingRight": padding_right,
-        "_N$horizontalDirection": h_direction,
-        "_N$verticalDirection": v_direction,
+        "_spacingX": spacing_x,
+        "_spacingY": spacing_y,
+        "_paddingTop": padding_top,
+        "_paddingBottom": padding_bottom,
+        "_paddingLeft": padding_left,
+        "_paddingRight": padding_right,
+        "_horizontalDirection": h_direction,
+        "_verticalDirection": v_direction,
     })
 
 
@@ -198,16 +210,21 @@ def add_progress_bar(scene_path: str | Path, node_id: int,
                      bar_sprite_id: int | None = None,
                      mode: int = 0, total_length: float = 100,
                      progress: float = 1.0, reverse: bool = False) -> int:
-    """Attach cc.ProgressBar. mode: 0=HORIZONTAL, 1=VERTICAL, 2=FILLED."""
+    """Attach cc.ProgressBar. mode: 0=HORIZONTAL, 1=VERTICAL, 2=FILLED.
+
+    All fields are protected in the 3.8 engine source — emit the
+    underscore-prefixed names. The bar_sprite ref uses ``_barSprite``
+    (``_N$barSprite`` was the 2.x mangled form).
+    """
     from cocos.scene_builder import add_component
     props: dict[str, Any] = {
-        "mode": mode,
-        "totalLength": total_length,
-        "progress": progress,
-        "reverse": reverse,
+        "_mode": mode,
+        "_totalLength": total_length,
+        "_progress": progress,
+        "_reverse": reverse,
     }
     if bar_sprite_id is not None:
-        props["_N$barSprite"] = _ref(bar_sprite_id)
+        props["_barSprite"] = _ref(bar_sprite_id)
     return add_component(scene_path, node_id, "cc.ProgressBar", props)
 
 
@@ -217,7 +234,14 @@ def add_scroll_view(scene_path: str | Path, node_id: int,
                     inertia: bool = True, brake: float = 0.75,
                     elastic: bool = True, bounce_duration: float = 0.23,
                     scroll_events: list[dict] | None = None) -> int:
-    """Attach cc.ScrollView. scroll_events: list from make_event_handler()."""
+    """Attach cc.ScrollView. scroll_events: list from make_event_handler().
+
+    Public @serializable fields (``horizontal``/``vertical``/``inertia``
+    /``brake``/``elastic``/``bounceDuration``/``scrollEvents``) stay
+    bare. The ``content`` ref is the backing ``_content`` field —
+    pre-audit we wrote ``content`` which the engine ignored, leaving
+    the scroll area without any content bound.
+    """
     s = _load_scene(scene_path)
     ser_events = _serialize_events(s, scroll_events)
     obj: dict[str, Any] = {
@@ -225,6 +249,7 @@ def add_scroll_view(scene_path: str | Path, node_id: int,
         "_name": "", "_objFlags": 0,
         "node": _ref(node_id), "_enabled": True, "__prefab": None,
         "_id": _nid("scv"),
+        # Public @serializable — bare names.
         "horizontal": horizontal,
         "vertical": vertical,
         "inertia": inertia,
@@ -234,7 +259,7 @@ def add_scroll_view(scene_path: str | Path, node_id: int,
         "scrollEvents": ser_events,
     }
     if content_id is not None:
-        obj["content"] = _ref(content_id)
+        obj["_content"] = _ref(content_id)
     cid = _attach_component(s, node_id, obj)
     _save_scene(scene_path, s)
     return cid
@@ -243,7 +268,13 @@ def add_scroll_view(scene_path: str | Path, node_id: int,
 def add_toggle(scene_path: str | Path, node_id: int,
                is_checked: bool = False, transition: int = 2,
                check_events: list[dict] | None = None) -> int:
-    """Attach cc.Toggle. check_events: list from make_event_handler()."""
+    """Attach cc.Toggle. check_events: list from make_event_handler().
+
+    Toggle extends Button, so inherits ``_transition`` /
+    ``_interactable`` with underscore prefixes. Its own backing field
+    ``_isChecked`` is protected too. ``checkEvents`` (public) and
+    ``target`` (from ComponentEventHandler) stay bare.
+    """
     s = _load_scene(scene_path)
     ser_events = _serialize_events(s, check_events)
     obj = {
@@ -252,10 +283,10 @@ def add_toggle(scene_path: str | Path, node_id: int,
         "node": _ref(node_id), "_enabled": True, "__prefab": None,
         "_id": _nid("tgl"),
         "target": _ref(node_id),
-        "isChecked": is_checked,
-        "transition": transition,
-        "_interactable": True,
         "checkEvents": ser_events,
+        "_interactable": True,
+        "_transition": transition,
+        "_isChecked": is_checked,
     }
     cid = _attach_component(s, node_id, obj)
     _save_scene(scene_path, s)
@@ -270,22 +301,40 @@ def add_editbox(scene_path: str | Path, node_id: int,
                 editing_did_ended: list[dict] | None = None,
                 editing_return: list[dict] | None = None,
                 text_changed: list[dict] | None = None) -> int:
-    """Attach cc.EditBox. All event params accept lists from make_event_handler()."""
+    """Attach cc.EditBox. All event params accept lists from make_event_handler().
+
+    The engine's ``_placeholderLabel`` / ``_textLabel`` fields are refs
+    to child Label nodes (set up at runtime if omitted). Event-handler
+    arrays (editingDidBegan, editingDidEnded, editingReturn,
+    textChanged) are public @serializable — kept bare. Other config
+    fields (maxLength, inputMode, returnType) are protected — emit
+    with underscore prefix.
+
+    The ``placeholder=`` parameter is kept for API stability but its
+    string is no longer written to the scene; Cocos 3.8 reads
+    placeholder text from a child Label via ``_placeholderLabel``, not
+    a direct string field. Configure placeholder content via the
+    child node after attach.
+    """
     s = _load_scene(scene_path)
+    # Swallow the parameter for backward API compatibility without
+    # emitting a field the engine ignores.
+    del placeholder
     obj = {
         "__type__": "cc.EditBox",
         "_name": "", "_objFlags": 0,
         "node": _ref(node_id), "_enabled": True, "__prefab": None,
         "_id": _nid("edb"),
-        "placeholder": placeholder,
-        "maxLength": max_length,
-        "inputMode": input_mode,
-        "returnType": return_type,
-        "_string": "",
+        # Public @serializable — bare names.
         "editingDidBegan": _serialize_events(s, editing_did_began),
         "editingDidEnded": _serialize_events(s, editing_did_ended),
         "editingReturn": _serialize_events(s, editing_return),
         "textChanged": _serialize_events(s, text_changed),
+        # Protected @serializable — underscore prefix.
+        "_string": "",
+        "_maxLength": max_length,
+        "_inputMode": input_mode,
+        "_returnType": return_type,
     }
     cid = _attach_component(s, node_id, obj)
     _save_scene(scene_path, s)
@@ -295,7 +344,11 @@ def add_editbox(scene_path: str | Path, node_id: int,
 def add_slider(scene_path: str | Path, node_id: int,
                direction: int = 0, progress: float = 0.5,
                slide_events: list[dict] | None = None) -> int:
-    """Attach cc.Slider. slide_events: list from make_event_handler()."""
+    """Attach cc.Slider. slide_events: list from make_event_handler().
+
+    Engine source uses private underscore-prefixed ``_direction`` /
+    ``_progress`` backing fields; ``slideEvents`` is public.
+    """
     s = _load_scene(scene_path)
     ser_events = _serialize_events(s, slide_events)
     obj = {
@@ -303,9 +356,9 @@ def add_slider(scene_path: str | Path, node_id: int,
         "_name": "", "_objFlags": 0,
         "node": _ref(node_id), "_enabled": True, "__prefab": None,
         "_id": _nid("sld"),
-        "direction": direction,
-        "progress": progress,
-        "slideEvents": ser_events,
+        "slideEvents": ser_events,  # public @serializable
+        "_direction": direction,
+        "_progress": progress,
     }
     cid = _attach_component(s, node_id, obj)
     _save_scene(scene_path, s)
@@ -348,14 +401,20 @@ def add_richtext(scene_path: str | Path, node_id: int,
             font_size = resolved
         if line_height == 40:
             line_height = int(resolved * 1.25)
+    # RichText field names (from cocos/2d/components/rich-text.ts):
+    # every @serializable is protected with underscore prefix — so
+    # ``_string`` / ``_fontSize`` / ``_maxWidth`` / ``_horizontalAlign``
+    # / ``_handleTouchEvent`` all need the underscore. Pre-audit we
+    # wrote the bare names and the RichText silently rendered its
+    # default '<color=#00ff00>Rich</color>...' placeholder.
     from cocos.scene_builder import add_component
     return add_component(scene_path, node_id, "cc.RichText", {
         "_lineHeight": line_height,
-        "string": text,
-        "fontSize": font_size,
-        "maxWidth": max_width,
-        "horizontalAlign": horizontal_align,
-        "handleTouchEvent": True,
+        "_string": text,
+        "_fontSize": font_size,
+        "_maxWidth": max_width,
+        "_horizontalAlign": horizontal_align,
+        "_handleTouchEvent": True,
     })
 
 
@@ -420,10 +479,13 @@ def add_ui_opacity(scene_path: str | Path, node_id: int, opacity: int = 255) -> 
 
     Essential for fade-in/out animations via tween:
       tween(node.getComponent(UIOpacity)).to(0.5, {opacity: 0}).start()
+
+    Engine source backs ``opacity`` with protected ``_opacity`` — JSON
+    key has the underscore.
     """
     from cocos.scene_builder import add_component
     return add_component(scene_path, node_id, "cc.UIOpacity", {
-        "opacity": opacity,
+        "_opacity": opacity,
     })
 
 
@@ -460,19 +522,25 @@ def add_page_view(scene_path: str | Path, node_id: int,
     Used for: tutorials, card galleries, level select screens.
     """
     from cocos.scene_builder import add_component
+    # PageView extends ScrollView — inherits public @serializable
+    # horizontal/vertical/inertia/elastic/bounceDuration. Its own
+    # tunables (_direction, _scrollThreshold, _pageTurningEventTiming,
+    # _indicator, _sizeMode) are protected with underscore prefix.
+    # Public @serializable additions: pageTurningSpeed,
+    # autoPageTurningThreshold.
     props: dict = {
-        "direction": direction,
-        "scrollThreshold": scroll_threshold,
-        "pageTurningSpeed": page_turning_speed,
-        "autoPageTurningThreshold": auto_page_turning_threshold,
         "inertia": True,
         "elastic": True,
         "bounceDuration": 0.23,
+        "pageTurningSpeed": page_turning_speed,
+        "autoPageTurningThreshold": auto_page_turning_threshold,
+        "_direction": direction,
+        "_scrollThreshold": scroll_threshold,
     }
     if content_id is not None:
-        props["content"] = {"__id__": content_id}
+        props["_content"] = {"__id__": content_id}  # inherited from ScrollView
     if indicator_id is not None:
-        props["indicator"] = {"__id__": indicator_id}
+        props["_indicator"] = {"__id__": indicator_id}
     return add_component(scene_path, node_id, "cc.PageView", props)
 
 
@@ -482,10 +550,12 @@ def add_toggle_container(scene_path: str | Path, node_id: int,
 
     Child Toggle nodes are mutually exclusive — only one can be checked at a time.
     Set allow_switch_off=True to allow all unchecked.
+
+    Backing field is protected ``_allowSwitchOff``.
     """
     from cocos.scene_builder import add_component
     return add_component(scene_path, node_id, "cc.ToggleContainer", {
-        "allowSwitchOff": allow_switch_off,
+        "_allowSwitchOff": allow_switch_off,
     })
 
 

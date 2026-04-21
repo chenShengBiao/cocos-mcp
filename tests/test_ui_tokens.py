@@ -225,10 +225,10 @@ def test_add_button_color_preset_auto_derives_states(tmp_path: Path):
     cid = sb.add_button(str(scene), n, color_preset="primary")
     obj = sb.get_object(scene, cid)
 
-    normal = obj["_N$normalColor"]
-    hover = obj["_N$hoverColor"]
-    pressed = obj["pressedColor"]
-    disabled = obj["_N$disabledColor"]
+    normal = obj["_normalColor"]
+    hover = obj["_hoverColor"]
+    pressed = obj["_pressedColor"]
+    disabled = obj["_disabledColor"]
 
     # Normal = primary = #6366f1
     assert (normal["r"], normal["g"], normal["b"]) == (99, 102, 241)
@@ -249,7 +249,7 @@ def test_add_button_explicit_hover_wins_over_derivation(tmp_path: Path):
                         color_preset="primary",
                         hover_color=(200, 0, 0, 255))
     obj = sb.get_object(scene, cid)
-    h = obj["_N$hoverColor"]
+    h = obj["_hoverColor"]
     assert (h["r"], h["g"], h["b"]) == (200, 0, 0)
 
 
@@ -260,8 +260,8 @@ def test_add_richtext_size_preset(tmp_path: Path):
     n = sb.add_node(scene, info["canvas_node_id"], "X")
     cid = sb.add_richtext(str(scene), n, size_preset="heading")
     obj = sb.get_object(scene, cid)
-    # pastel_cozy.font_size.heading = 44
-    assert obj["fontSize"] == 44
+    # pastel_cozy.font_size.heading = 44 — engine stores as _fontSize.
+    assert obj["_fontSize"] == 44
     # line_height auto-set to 1.25×
     assert obj["_lineHeight"] == int(44 * 1.25)
 

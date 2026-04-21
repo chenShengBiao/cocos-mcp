@@ -93,7 +93,7 @@ def test_dialog_modal_buttons_use_theme_colors(tmp_path: Path):
     btn_cmp = next(c for c in _components_on_node(scene, btn_node)
                    if c["__type__"] == "cc.Button")
     # dark_game.primary = #6366f1 = rgb(99,102,241)
-    nc = btn_cmp["_N$normalColor"]
+    nc = btn_cmp["_normalColor"]
     assert (nc["r"], nc["g"], nc["b"]) == (99, 102, 241)
 
 
@@ -227,7 +227,7 @@ def test_fade_in_uiopacity_starts_at_zero(tmp_path: Path):
 
     opacity_cmp = next(c for c in _components_on_node(scene, n)
                        if c["__type__"] == "cc.UIOpacity")
-    assert opacity_cmp["opacity"] == 0
+    assert opacity_cmp["_opacity"] == 0  # backing field (protected)
 
 
 def test_fade_in_clip_uuid_wired_to_animation(tmp_path: Path):

@@ -187,7 +187,10 @@ class TestComponents:
         with open(path) as f:
             data = json.load(f)
         assert data[cid]["__type__"] == "cc.Button"
-        assert data[cid]["transition"] == 2
+        # Cocos 3.8 serializes Button.transition as _transition (protected
+        # backing field). Pre-audit we wrote the bare name and the engine
+        # silently used its default (SCALE).
+        assert data[cid]["_transition"] == 2
 
     def test_generic_add_component(self):
         path, info = _tmp_scene()
@@ -667,6 +670,212 @@ class TestPhysicsSerializationShape:
         assert j["_autoCalcDistance"] is False
 
 
+# ========================================================================
+# UI component serialization shape lock-in.
+# Same drift pattern as physics — Cocos 2.x-era `_N$` mangled names and
+# missing-underscore bare names for protected backing fields meant
+# every Button / Layout / ProgressBar / AudioSource / RichText etc.
+# built by cocos-mcp ran with engine defaults at runtime. These tests
+# pin the corrected shape.
+# ========================================================================
+
+
+class TestUISerializationShape:
+    def test_button_protected_fields_have_underscore(self):
+        from cocos.scene_builder import add_button
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "B")
+        cid = add_button(path, n, transition=1, zoom_scale=1.3)
+        with open(path) as f:
+            btn = json.load(f)[cid]
+        # Protected backing fields → underscore prefix.
+        assert btn["_transition"] == 1
+        assert btn["_zoomScale"] == 1.3
+        assert btn["_duration"] == 0.1
+        assert btn["_interactable"] is True
+        # Colors use the new names, not Cocos 2.x `_N$` mangle.
+        for k in ("_normalColor", "_hoverColor", "_pressedColor", "_disabledColor"):
+            assert k in btn, f"Button missing {k}"
+        # Legacy forms must be gone.
+        for bad in ("transition", "zoomScale", "duration",
+                    "_N$normalColor", "_N$hoverColor", "pressedColor",
+                    "_N$disabledColor"):
+            assert bad not in btn, f"legacy Button field {bad!r} resurrected"
+        # Public @serializable stays bare.
+        assert "clickEvents" in btn
+
+    def test_layout_protected_fields_have_plain_underscore(self):
+        from cocos.scene_builder import add_layout
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "L")
+        cid = add_layout(path, n, spacing_x=12, padding_top=5)
+        with open(path) as f:
+            lay = json.load(f)[cid]
+        # Plain `_` prefix; `_N$` was the 2.x-mangled form that 3.8 ignores.
+        for k in ("_spacingX", "_spacingY", "_paddingTop", "_paddingBottom",
+                  "_paddingLeft", "_paddingRight",
+                  "_horizontalDirection", "_verticalDirection"):
+            assert k in lay, f"Layout missing {k}"
+        for bad in ("_N$spacingX", "_N$spacingY", "_N$paddingTop",
+                    "_N$horizontalDirection"):
+            assert bad not in lay
+        assert lay["_spacingX"] == 12
+        assert lay["_paddingTop"] == 5
+
+    def test_progress_bar_protected_fields_have_underscore(self):
+        from cocos.scene_builder import add_progress_bar
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "P")
+        cid = add_progress_bar(path, n, mode=1, total_length=50, progress=0.3)
+        with open(path) as f:
+            pgb = json.load(f)[cid]
+        assert pgb["_mode"] == 1
+        assert pgb["_totalLength"] == 50
+        assert pgb["_progress"] == 0.3
+        assert pgb["_reverse"] is False
+        for bad in ("mode", "totalLength", "progress", "reverse", "_N$barSprite"):
+            assert bad not in pgb
+
+    def test_scroll_view_public_bare_private_underscore(self):
+        from cocos.scene_builder import add_scroll_view
+        path, info = _tmp_scene()
+        parent = add_node(path, info["canvas_node_id"], "SV")
+        content = add_node(path, parent, "content")
+        cid = add_scroll_view(path, parent, content_id=content,
+                              horizontal=True, vertical=False, brake=0.8)
+        with open(path) as f:
+            sv = json.load(f)[cid]
+        # Public @serializable — bare name.
+        for k in ("horizontal", "vertical", "inertia", "brake", "elastic",
+                  "bounceDuration", "scrollEvents"):
+            assert k in sv, f"ScrollView missing public {k}"
+        # Private backing field.
+        assert sv["_content"] == {"__id__": content}
+        assert "content" not in sv, "legacy bare-name content resurrected"
+        assert sv["horizontal"] is True
+        assert sv["brake"] == 0.8
+
+    def test_toggle_inherits_button_field_names(self):
+        from cocos.scene_builder import add_toggle
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "T")
+        cid = add_toggle(path, n, is_checked=True, transition=1)
+        with open(path) as f:
+            tgl = json.load(f)[cid]
+        # Toggle inherits Button → _transition / _interactable.
+        # Its own _isChecked is protected with underscore.
+        assert tgl["_isChecked"] is True
+        assert tgl["_transition"] == 1
+        assert tgl["_interactable"] is True
+        # Public: checkEvents, target.
+        assert "checkEvents" in tgl
+        assert tgl["target"] == {"__id__": n}
+        for bad in ("isChecked", "transition"):
+            assert bad not in tgl
+
+    def test_editbox_protected_backing_fields(self):
+        from cocos.scene_builder import add_editbox
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "E")
+        cid = add_editbox(path, n, max_length=30, input_mode=2, return_type=1)
+        with open(path) as f:
+            eb = json.load(f)[cid]
+        assert eb["_maxLength"] == 30
+        assert eb["_inputMode"] == 2
+        assert eb["_returnType"] == 1
+        assert eb["_string"] == ""
+        # Public @serializable event arrays — bare.
+        for k in ("editingDidBegan", "editingDidEnded",
+                  "editingReturn", "textChanged"):
+            assert k in eb
+        # Cocos 2.x ``placeholder`` string field no longer emitted —
+        # 3.8 reads placeholder via _placeholderLabel Label ref.
+        assert "placeholder" not in eb
+        for bad in ("maxLength", "inputMode", "returnType"):
+            assert bad not in eb
+
+    def test_slider_private_direction_progress(self):
+        from cocos.scene_builder import add_slider
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "S")
+        cid = add_slider(path, n, direction=1, progress=0.75)
+        with open(path) as f:
+            sl = json.load(f)[cid]
+        assert sl["_direction"] == 1
+        assert sl["_progress"] == 0.75
+        assert "slideEvents" in sl  # public
+        for bad in ("direction", "progress"):
+            assert bad not in sl
+
+    def test_richtext_all_protected_underscored(self):
+        from cocos.scene_builder import add_richtext
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "R")
+        cid = add_richtext(path, n, text="<b>Hi</b>", font_size=30,
+                           max_width=500, horizontal_align=1)
+        with open(path) as f:
+            rt = json.load(f)[cid]
+        assert rt["_string"] == "<b>Hi</b>"
+        assert rt["_fontSize"] == 30
+        assert rt["_maxWidth"] == 500
+        assert rt["_horizontalAlign"] == 1
+        assert rt["_handleTouchEvent"] is True
+        for bad in ("string", "fontSize", "maxWidth",
+                    "horizontalAlign", "handleTouchEvent"):
+            assert bad not in rt
+
+    def test_ui_opacity_backing_field(self):
+        from cocos.scene_builder import add_ui_opacity
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "O")
+        cid = add_ui_opacity(path, n, opacity=128)
+        with open(path) as f:
+            op = json.load(f)[cid]
+        assert op["_opacity"] == 128
+        assert "opacity" not in op
+
+    def test_page_view_protected_private_fields(self):
+        from cocos.scene_builder import add_page_view
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "PV")
+        cid = add_page_view(path, n, direction=1, scroll_threshold=0.8)
+        with open(path) as f:
+            pv = json.load(f)[cid]
+        assert pv["_direction"] == 1
+        assert pv["_scrollThreshold"] == 0.8
+        # Inherited public ScrollView fields — bare.
+        for k in ("inertia", "elastic", "bounceDuration",
+                  "pageTurningSpeed", "autoPageTurningThreshold"):
+            assert k in pv
+        for bad in ("direction", "scrollThreshold"):
+            assert bad not in pv
+
+    def test_audio_source_protected_underscored(self):
+        from cocos.scene_builder import add_audio_source
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "A")
+        cid = add_audio_source(path, n, clip_uuid="abc-xxxx",
+                               play_on_awake=True, loop=True, volume=0.6)
+        with open(path) as f:
+            au = json.load(f)[cid]
+        assert au["_playOnAwake"] is True
+        assert au["_loop"] is True
+        assert au["_volume"] == 0.6
+        assert au["_clip"] == {"__uuid__": "abc-xxxx"}
+        for bad in ("playOnAwake", "loop", "volume"):
+            assert bad not in au
+
+    def test_toggle_container_backing_field(self):
+        from cocos.scene_builder import add_toggle_container
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "TC")
+        cid = add_toggle_container(path, n, allow_switch_off=True)
+        with open(path) as f:
+            tc = json.load(f)[cid]
+        assert tc["_allowSwitchOff"] is True
+        assert "allowSwitchOff" not in tc
+
+
 class TestNewComponents:
     def test_add_camera(self):
         path, info = _tmp_scene()
@@ -696,7 +905,8 @@ class TestNewComponents:
         with open(path) as f:
             data = json.load(f)
         assert data[cid]["__type__"] == "cc.RichText"
-        assert data[cid]["string"] == "<b>Bold</b>"
+        # RichText.string → _string backing field.
+        assert data[cid]["_string"] == "<b>Bold</b>"
 
     def test_add_sliced_sprite(self):
         path, info = _tmp_scene()
