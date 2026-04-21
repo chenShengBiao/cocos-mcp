@@ -158,6 +158,9 @@ def test_create_sprite_atlas_packs_multiple_pngs(tmp_path: Path):
     assert Path(res["dir"]).is_dir()
     assert Path(res["pac_path"]).exists()
     assert len(res["images"]) == 3
+    # atlas_dir_rel tells the caller where to drop more PNGs for the
+    # same atlas — the "auto" half of AutoAtlas.
+    assert res["atlas_dir_rel"] == "assets/atlas/ui_icons"
 
     # Each image got copied + got a sprite-frame meta
     for img in res["images"]:
@@ -165,10 +168,84 @@ def test_create_sprite_atlas_packs_multiple_pngs(tmp_path: Path):
         assert (Path(img["path"]).with_name(Path(img["path"]).name + ".meta")).exists()
         assert img["sprite_frame_uuid"] == f"{img['uuid']}@f9941"
 
-    # The .pac file is a JSON SpriteAtlas spec
+    # The .pac file is the single-line marker Cocos 3.8's importer
+    # looks for — the full packing config lives in .pac.meta userData
+    # (see test_create_sprite_atlas_meta_has_complete_userData below).
     pac = json.loads(Path(res["pac_path"]).read_text())
-    assert pac["__type__"] == "cc.SpriteAtlas"
-    assert pac["_name"] == "ui_icons"
+    assert pac == {"__type__": "cc.SpriteAtlas"}
+
+
+def test_create_sprite_atlas_without_png_paths_still_valid(tmp_path: Path):
+    """AutoAtlas is primarily a build-time folder-scan mechanism —
+    the real value is that ANY sprite-frame PNG dropped into the atlas
+    folder afterwards gets packed automatically. Calling
+    create_sprite_atlas without PNGs must still produce a valid .pac +
+    meta pair; the caller then uses cocos_add_image to drop PNGs into
+    atlas_dir_rel."""
+    proj = _make_project(tmp_path)
+    res = cp.create_sprite_atlas(str(proj), "empty_pool")
+    assert res["images"] == []
+    assert Path(res["pac_path"]).exists()
+    pac = json.loads(Path(res["pac_path"]).read_text())
+    assert pac == {"__type__": "cc.SpriteAtlas"}
+
+
+def test_create_sprite_atlas_meta_has_complete_userData(tmp_path: Path):
+    """Cocos 3.8's auto-atlas importer reads packing config from the
+    .pac.meta userData block, not from the .pac body. Prior versions
+    of this module used ``"ver": "1.0.7"`` and left userData empty,
+    causing the importer to silently skip packing (scene said
+    SpriteAtlas but no texture was produced at build time).
+
+    Regression guard: ensure the full 3.8 userData shape + version
+    survive every change.
+    """
+    proj = _make_project(tmp_path)
+    res = cp.create_sprite_atlas(str(proj), "icons")
+    meta_path = Path(res["pac_path"] + ".meta")
+    meta = json.loads(meta_path.read_text())
+
+    assert meta["ver"] == "1.0.8"  # prior 1.0.7 silently rejected
+    assert meta["importer"] == "auto-atlas"
+    assert meta["imported"] is True
+    assert meta["uuid"] == res["atlas_uuid"]
+    assert meta["files"] == [".json"]
+
+    ud = meta["userData"]
+    # Every field Cocos 3.8 expects — leave any out and the importer
+    # falls back to safer-but-useless defaults.
+    for key in ("maxWidth", "maxHeight", "padding", "allowRotation",
+                "forceSquared", "powerOfTwo", "algorithm", "format",
+                "quality", "contourBleed", "paddingBleed",
+                "filterUnused", "removeTextureInBundle",
+                "removeImageInBundle", "removeSpriteAtlasInBundle",
+                "compressSettings", "textureSetting"):
+        assert key in ud, f"auto-atlas userData missing {key}"
+    # Algorithm must be "MaxRects" (plural); "MaxRect" was a typo we
+    # used to emit — the importer silently ignored it.
+    assert ud["algorithm"] == "MaxRects"
+    assert ud["textureSetting"]["wrapModeS"] == "repeat"
+
+
+def test_create_sprite_atlas_tunables_override_defaults(tmp_path: Path):
+    """Caller-supplied overrides (max_width/padding/power_of_two/...)
+    land in the .pac.meta userData."""
+    proj = _make_project(tmp_path)
+    res = cp.create_sprite_atlas(str(proj), "tuned",
+                                 max_width=2048, max_height=2048,
+                                 padding=4, power_of_two=True,
+                                 force_squared=True, filter_unused=False,
+                                 algorithm="Basic", quality=100)
+    meta = json.loads(Path(res["pac_path"] + ".meta").read_text())
+    ud = meta["userData"]
+    assert ud["maxWidth"] == 2048
+    assert ud["maxHeight"] == 2048
+    assert ud["padding"] == 4
+    assert ud["powerOfTwo"] is True
+    assert ud["forceSquared"] is True
+    assert ud["filterUnused"] is False
+    assert ud["algorithm"] == "Basic"
+    assert ud["quality"] == 100
 
 
 def test_create_sprite_atlas_skips_missing_pngs(tmp_path: Path):
@@ -181,6 +258,49 @@ def test_create_sprite_atlas_skips_missing_pngs(tmp_path: Path):
                                  [str(real), str(tmp_path / "missing.png")])
     assert len(res["images"]) == 1
     assert Path(res["images"][0]["path"]).name == "real.png"
+
+
+# ============================================================
+#  enable_dynamic_atlas (runtime draw-call reduction)
+# ============================================================
+
+def test_enable_dynamic_atlas_writes_script_with_flag(tmp_path: Path):
+    """The generated .ts must actually flip
+    ``dynamicAtlasManager.enabled = true`` on onLoad — otherwise
+    attaching it does nothing."""
+    proj = _make_project(tmp_path)
+    res = cp.enable_dynamic_atlas(str(proj))
+
+    assert res["rel_path"].endswith(".ts")
+    src = Path(res["path"]).read_text()
+    # The critical line — without this, the whole point is lost.
+    assert "dynamicAtlasManager.enabled = true" in src
+    # Singleton pattern + maxFrameSize knob exposed.
+    assert "public static I:" in src
+    assert "maxFrameSize" in src
+    # Ships both UUID forms so the caller can attach as scene component.
+    assert len(res["uuid_standard"]) == 36
+    assert len(res["uuid_compressed"]) == 23
+
+
+def test_enable_dynamic_atlas_custom_max_frame_size(tmp_path: Path):
+    proj = _make_project(tmp_path)
+    res = cp.enable_dynamic_atlas(str(proj), max_frame_size=1024,
+                                  class_name="MyBooter")
+    src = Path(res["path"]).read_text()
+    assert "maxFrameSize: number = 1024" in src
+    assert "class MyBooter extends Component" in src
+
+
+def test_enable_dynamic_atlas_preserves_uuid_on_rewrite(tmp_path: Path):
+    """Re-running the helper should preserve the meta UUID — same Bug A
+    idempotency guarantee as every other scaffold-style generator. If
+    the UUID flips, every scene-attached instance goes no-op."""
+    proj = _make_project(tmp_path)
+    first = cp.enable_dynamic_atlas(str(proj))
+    second = cp.enable_dynamic_atlas(str(proj), max_frame_size=256)
+    assert first["uuid_standard"] == second["uuid_standard"]
+    assert first["uuid_compressed"] == second["uuid_compressed"]
 
 
 # ============================================================

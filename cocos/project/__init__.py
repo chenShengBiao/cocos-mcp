@@ -27,7 +27,7 @@ from .assets import (
     get_project_info,
     list_assets,
 )
-from .atlas import create_sprite_atlas
+from .atlas import create_sprite_atlas, enable_dynamic_atlas
 from .gen_image import generate_and_import_image
 from .installs import (
     INSTALL_ROOTS,
@@ -79,6 +79,7 @@ __all__ = [
     "create_animation_clip",
     "create_physics_material",
     "create_sprite_atlas",
+    "enable_dynamic_atlas",
     "find_creator",
     "generate_and_import_image",
     "get_project_info",

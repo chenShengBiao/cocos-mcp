@@ -107,20 +107,87 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def cocos_create_sprite_atlas(project_path: str, atlas_name: str,
-                                  png_paths: list[str],
+                                  png_paths: list[str] | None = None,
                                   rel_dir: str | None = None,
-                                  max_width: int = 2048, max_height: int = 2048) -> dict:
-        """Bundle multiple PNGs into a SpriteAtlas (AutoAtlas .pac).
+                                  max_width: int = 1024, max_height: int = 1024,
+                                  padding: int = 2,
+                                  power_of_two: bool = False,
+                                  force_squared: bool = False,
+                                  filter_unused: bool = True,
+                                  algorithm: str = "MaxRects",
+                                  quality: int = 80) -> dict:
+        """Create an AutoAtlas bundle (Cocos 3.8 build-time packing).
 
-        Copies PNGs into assets/atlas/<name>/, writes sprite-frame metas,
-        and creates a .pac config. Cocos Creator merges them into one
-        texture at build time for better draw-call performance.
+        Drops a ``<atlas_name>.pac`` marker + correct meta into a folder
+        (default ``assets/atlas/<name>/``). From that point on, **every
+        sprite-frame PNG in that folder** is automatically packed into
+        one atlas texture when ``cocos_build`` runs — no manual
+        enumeration needed afterward.
 
-        Returns {dir, atlas_uuid, pac_path, images: [{path, uuid, sprite_frame_uuid}]}.
-        Use each image's sprite_frame_uuid with cocos_add_sprite().
+        ``png_paths`` is optional. If provided, the PNGs are copied into
+        the atlas folder + sprite-frame metas are written. For PNGs
+        already in the folder (e.g. ``cocos_add_image(rel_path=
+        "assets/atlas/<name>/foo.png")``), no copy is required; they
+        are picked up at build time automatically.
+
+        Tunables (all match Cocos Creator 3.8 defaults):
+          * ``max_width`` / ``max_height`` — atlas texture size cap (1024).
+          * ``padding``                    — gap between frames in px (2).
+          * ``power_of_two``               — force ^2 sizes; usually off.
+          * ``force_squared``              — force 1:1 aspect; usually off.
+          * ``filter_unused``              — drop unreferenced sprite
+                                             frames from the final bundle.
+          * ``algorithm``                  — ``"MaxRects"`` (default) or
+                                             ``"Basic"``.
+          * ``quality``                    — 0-100 PNG quality.
+
+        Returns ``{dir, atlas_uuid, pac_path, images, atlas_dir_rel}``.
+        ``atlas_dir_rel`` is the project-relative folder — drop more
+        PNGs there later to add them to the atlas without running this
+        tool again.
         """
-        return cp.create_sprite_atlas(project_path, atlas_name, png_paths,
-                                      rel_dir, max_width=max_width, max_height=max_height)
+        return cp.create_sprite_atlas(
+            project_path, atlas_name, png_paths, rel_dir,
+            max_width=max_width, max_height=max_height, padding=padding,
+            power_of_two=power_of_two, force_squared=force_squared,
+            filter_unused=filter_unused, algorithm=algorithm,
+            quality=quality,
+        )
+
+    @mcp.tool()
+    def cocos_enable_dynamic_atlas(project_path: str,
+                                   rel_path: str = "DynamicAtlasBooter.ts",
+                                   max_frame_size: int = 512,
+                                   class_name: str = "DynamicAtlasBooter") -> dict:
+        """Generate a boot script that enables Cocos 3.8's runtime
+        dynamic atlas (``dynamicAtlasManager.enabled = true``).
+
+        Complements ``cocos_create_sprite_atlas`` — AutoAtlas packs at
+        BUILD time, DynamicAtlas packs at RUN time. Turning both on
+        catches small UI frames the AutoAtlas doesn't cover (e.g.
+        runtime-generated text, sprite frames loaded lazily).
+
+        The generated .ts flips the global flag on ``onLoad``; attach
+        the resulting component to any persistent scene node (typically
+        a GameManager). Typical flow::
+
+            r = cocos_enable_dynamic_atlas(project)
+            cocos_add_script(scene, gm_node_id, r["uuid_compressed"])
+
+        Parameters:
+
+        * ``rel_path``       — defaults to ``DynamicAtlasBooter.ts``
+                               under ``assets/scripts/``.
+        * ``max_frame_size`` — sprite frames larger than this (px) are
+                               NOT batched. Engine default 512.
+        * ``class_name``     — TypeScript class name on the script.
+
+        Returns ``{path, rel_path, uuid_standard, uuid_compressed}``.
+        """
+        return cp.enable_dynamic_atlas(
+            project_path, rel_path=rel_path,
+            max_frame_size=max_frame_size, class_name=class_name,
+        )
 
     @mcp.tool()
     def cocos_create_animation_clip(project_path: str, clip_name: str,

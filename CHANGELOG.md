@@ -6,7 +6,76 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Total: **183 tools** (was 80) · **707 tests** (was 45) · **0 mypy / ruff errors**.
+Total: **184 tools** (was 80) · **734 tests** (was 45) · **0 mypy / ruff errors**.
+
+### Fixed — AutoAtlas .pac shape + added runtime DynamicAtlas helper (183 → 184 tools)
+
+`cocos_create_sprite_atlas` produced files that Cocos 3.8's
+auto-atlas importer silently rejected, so the build emitted a
+`SpriteAtlas` marker but no packed texture. The scene still
+referenced the raw PNGs individually — heavy UI screens saw
+no draw-call reduction. Found during a post-fix sweep of
+Cocos 3.8 asset serialization. All bugs now regression-guarded.
+
+**Real bugs fixed:**
+
+* `.pac` body had packing config (maxWidth / padding / algorithm / …)
+  in-line; in 3.8 the body is a single-line marker
+  `{"__type__": "cc.SpriteAtlas"}` and **all config lives in
+  `.pac.meta` `userData`**. Extra body fields don't break parsing
+  but don't take effect — they were silently discarded.
+* Meta used `"ver": "1.0.7"` — 3.8 expects `"1.0.8"`, and the
+  importer's version gate silently rejects anything else.
+* Meta `userData` was empty (`{}`). 3.8 expects 17 keys including
+  `removeTextureInBundle`, `removeImageInBundle`,
+  `removeSpriteAtlasInBundle`, `compressSettings`, `textureSetting`
+  (nested: `wrapModeS` / `minfilter` / etc.) — without these the
+  importer falls back to "do nothing" defaults.
+* Algorithm string was `"MaxRect"`; correct 3.8 name is
+  `"MaxRects"` (plural). Mis-named algorithm → importer ignores.
+* Defaults were wrong: `maxWidth`/`maxHeight` 2048 (3.8 default
+  1024), `powerOfTwo` true (3.8 default false), `filterUnused`
+  false (3.8 default true).
+* `png_paths` was required, which contradicts AutoAtlas's core
+  "scan-folder-on-build" mechanic. Now optional; callers can drop
+  PNGs into `atlas_dir_rel` (returned in response) at any time
+  and the build picks them up.
+
+**`cocos_enable_dynamic_atlas`** (new, runtime packing):
+
+  Cocos 3.8 ships a separate runtime batching system
+  (`dynamicAtlasManager.enabled = true`) that blits small sprite
+  frames into shared GPU textures at draw time. Turning it on
+  typically saves 3-10× draw calls on heavy UI screens — frames
+  too new or too dynamic for AutoAtlas still benefit. The flag is
+  a one-liner in a boot script; this tool generates the script +
+  hands back both UUIDs so the caller can immediately attach::
+
+    r = cocos_enable_dynamic_atlas(project, max_frame_size=512)
+    cocos_add_script(scene, gm_node, r["uuid_compressed"])
+
+  Script is idempotent on re-generation (Bug A fix applies here
+  too — preserves UUID on rewrite, so already-attached components
+  keep resolving).
+
+**Tests — 728 → 734 (+6)**
+
+* `test_create_sprite_atlas_without_png_paths_still_valid` —
+  creating an empty atlas folder must produce a valid importable
+  `.pac` + meta pair; further PNGs dropped in later are picked up
+  by build automatically.
+* `test_create_sprite_atlas_meta_has_complete_userData` — lock-in
+  on `ver: 1.0.8` + all 17 required userData fields + nested
+  `textureSetting`. Regression guard.
+* `test_create_sprite_atlas_tunables_override_defaults` — caller
+  kwargs (max_width, padding, algorithm, quality, …) reach the
+  `userData` block.
+* `test_enable_dynamic_atlas_writes_script_with_flag` — generated
+  `.ts` actually contains `dynamicAtlasManager.enabled = true`.
+* `test_enable_dynamic_atlas_custom_max_frame_size` — `maxFrameSize`
+  constant lands in the source.
+* `test_enable_dynamic_atlas_preserves_uuid_on_rewrite` — idempotent
+  UUID on regenerate (Bug A guarantee).
 
 ### Added — Batch-op extensions + 2 composites + introspection (180 → 183 tools)
 

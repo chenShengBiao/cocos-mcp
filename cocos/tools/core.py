@@ -33,6 +33,7 @@ _CATEGORY_RULES: tuple[tuple[str, str], ...] = (
     ("add_resource_file", "asset"),
     ("sprite_frame", "asset"),
     ("sprite_atlas", "asset"),
+    ("dynamic_atlas", "asset"),
     ("animation_clip", "asset"),
     ("upgrade_image", "asset"),
     ("generate_asset", "asset"),
