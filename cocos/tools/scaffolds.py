@@ -76,3 +76,102 @@ def register(mcp: FastMCP) -> None:
         Returns {path, rel_path, uuid_standard, uuid_compressed}.
         """
         return sc.scaffold_score_system(project_path, rel_path)
+
+    @mcp.tool()
+    def cocos_scaffold_player_controller(project_path: str,
+                                         kind: str = "platformer",
+                                         rel_path: str | None = None) -> dict:
+        """Generate Player{Kind}.ts — game-type-specific player controller.
+
+        Reads the ``InputManager`` singleton (run cocos_scaffold_input_abstraction
+        FIRST) and drives node motion. Which fields the script exposes on
+        the Inspector depends on the kind:
+
+          "platformer" — side-view with gravity. Reads moveDir.x + jumpPressed.
+                         Requires cc.RigidBody2D + cc.Collider2D on the node.
+                         @property moveSpeed / jumpForce / doubleJumpEnabled.
+          "topdown"    — bird's-eye. Full moveDir. RigidBody2D gravityScale
+                         should be 0. @property moveSpeed.
+          "flappy"     — jump-only. jumpPressed → fixed velocity.y impulse.
+                         @property flapForce. Gravity carries it down.
+          "click_only" — no physics body. Each click eases node _lpos toward
+                         the hit point via tween. @property easeSpeed.
+
+        Default ``rel_path`` per kind: PlayerPlatformer.ts / PlayerTopdown.ts /
+        PlayerFlappy.ts / PlayerClick.ts. Returns
+        {path, rel_path, uuid_standard, uuid_compressed}.
+        """
+        return sc.scaffold_player_controller(project_path, kind, rel_path)
+
+    @mcp.tool()
+    def cocos_scaffold_enemy_ai(project_path: str,
+                                kind: str = "patrol",
+                                rel_path: str | None = None) -> dict:
+        """Generate Enemy{Kind}.ts — common enemy-behaviour starters.
+
+          "patrol" — oscillates between @property Nodes patrolA ↔ patrolB.
+                     Flips optional @property mirrorSprite on direction
+                     change. Exposes @property speed.
+          "chase"  — tracks @property target Node when within chaseRadius;
+                     gives up past loseAggroRadius (hysteresis prevents
+                     aggro flicker). Kinematic setPosition update.
+                     @property moveSpeed.
+          "shoot"  — stationary turret. Every @property fireInterval s,
+                     instantiates @property bulletPrefab with velocity
+                     toward @property target if within @property range.
+
+        Default ``rel_path`` per kind: EnemyPatrol.ts / EnemyChase.ts /
+        EnemyShoot.ts. Returns the usual four keys.
+        """
+        return sc.scaffold_enemy_ai(project_path, kind, rel_path)
+
+    @mcp.tool()
+    def cocos_scaffold_spawner(project_path: str,
+                               kind: str = "time",
+                               rel_path: str | None = None) -> dict:
+        """Generate Spawner{Kind}.ts — instantiate @property prefab on a trigger.
+
+          "time"      — every @property interval s, up to @property maxActive
+                        concurrent. Jitters spawn position within
+                        @property spawnBoxSize half-extents. Over cap:
+                        despawn oldest (destroy + shift queue).
+          "proximity" — spawn when @property player is within
+                        @property triggerRadius, respecting @property cooldown
+                        seconds and @property maxActive cap.
+
+        Both variants parent spawned nodes under ``this.node.parent``
+        (NOT the spawner itself — inheriting the spawner's transform is
+        usually wrong) and fire optional @property onSpawn callback post-
+        addChild so game code can attach health, patrol targets, etc.
+
+        Default ``rel_path``: SpawnerTime.ts / SpawnerProximity.ts.
+        """
+        return sc.scaffold_spawner(project_path, kind, rel_path)
+
+    @mcp.tool()
+    def cocos_scaffold_game_loop(project_path: str,
+                                 states: list[str] | None = None,
+                                 rel_path: str = "GameLoop.ts") -> dict:
+        """Generate GameLoop.ts — singleton state machine.
+
+        ``states``: ordered list, default ["menu", "play", "over"].
+        Each state name generates a pair of inspector-visible callbacks:
+        ``onEnter<PascalCase>`` and ``onExit<PascalCase>`` — so ``"game_over"``
+        becomes ``onEnterGameOver`` / ``onExitGameOver``. Designers can wire
+        either from the Inspector or from script code.
+
+        Runtime API::
+
+            GameLoop.I.current          // current state name
+            GameLoop.I.go(state)        // transition; fires onExit<old> → onEnter<new>
+            GameLoop.I.reset()          // jump to first state
+
+        State-name validation at scaffold time:
+          - at least one state
+          - identifier-safe (no spaces, no leading digits)
+          - no duplicates
+        Violations raise ValueError so the broken template never lands.
+
+        Returns {path, rel_path, uuid_standard, uuid_compressed}.
+        """
+        return sc.scaffold_game_loop(project_path, states, rel_path)
