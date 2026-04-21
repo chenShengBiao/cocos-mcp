@@ -1,7 +1,7 @@
 [project]
 name = "cocos-mcp"
 version = "1.2.0.dev0"
-description = "Headless Cocos Creator 3.8 MCP server — 109+ tools for AI-autonomous game development (Proprietary)"
+description = "Headless Cocos Creator 3.8 MCP server — 184 tools for AI-autonomous game development (Proprietary)"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.11"

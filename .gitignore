@@ -19,3 +19,6 @@ htmlcov/
 # editor
 .vscode/
 .idea/
+
+# playwright MCP session artifacts (console logs + page snapshots)
+.playwright-mcp/
