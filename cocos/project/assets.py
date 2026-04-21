@@ -55,8 +55,23 @@ def get_project_info(project_path: str | Path) -> dict:
     return info
 
 
-def add_script(project_path: str | Path, rel_path: str, source: str, uuid: str | None = None) -> dict:
-    """Write a TypeScript script + its meta into the project."""
+def add_script(project_path: str | Path, rel_path: str, source: str,
+               uuid: str | None = None) -> dict:
+    """Write a TypeScript script + its meta into the project.
+
+    Idempotent on overwrite: if a ``.ts.meta`` already exists at the
+    target path AND the caller didn't pass an explicit ``uuid=``, we
+    preserve the existing UUID so any scene/prefab already referencing
+    this script's compressed form keeps resolving. Prior releases
+    silently minted a new UUID on overwrite and broke every reference
+    — a real bug the first dogfood run surfaced. Passing ``uuid=`` now
+    still lets callers force a new identity when they genuinely want
+    to fork the asset.
+
+    Returns ``{path, rel_path, uuid, created}`` where ``created`` is
+    True when we wrote a fresh .ts.meta and False when we preserved an
+    existing UUID.
+    """
     p = Path(project_path).expanduser().resolve()
     rel = rel_path.lstrip("/")
     if not rel.startswith("assets/"):
@@ -65,6 +80,26 @@ def add_script(project_path: str | Path, rel_path: str, source: str, uuid: str |
         rel = f"{rel}.ts"
     target = p / rel
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    # Preserve existing UUID on overwrite unless caller explicitly forced
+    # a new one. Only consult the adjacent meta — ignore .ts presence
+    # alone, since a corrupt / partial write could leave the .ts without
+    # a meta (and we want to recover by minting fresh in that case).
+    created = True
+    if uuid is None:
+        meta_path = Path(f"{target}.meta")
+        if meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    existing_meta = json.load(f)
+                existing_uuid = existing_meta.get("uuid")
+                if isinstance(existing_uuid, str) and existing_uuid:
+                    uuid = existing_uuid
+                    created = False
+            except (OSError, json.JSONDecodeError):
+                # Corrupt meta — mint fresh and overwrite. Keeps the
+                # repair path automatic.
+                pass
 
     with open(target, "w") as f:
         f.write(source)
@@ -76,6 +111,7 @@ def add_script(project_path: str | Path, rel_path: str, source: str, uuid: str |
         "path": str(target),
         "rel_path": rel,
         "uuid": meta["uuid"],
+        "created": created,
     }
 
 

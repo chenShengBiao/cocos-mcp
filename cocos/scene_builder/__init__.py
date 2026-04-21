@@ -49,6 +49,7 @@ from ._helpers import (
     _attach_component,
     _auto_wrap_value,
     _color,
+    _ensure_node_prefab_info,
     _ensure_uitransform,
     _has_uitransform,
     _load_scene,
@@ -358,7 +359,13 @@ def create_empty_scene(scene_path: str | Path, scene_uuid: str | None = None,
 def add_node(scene_path: str | Path, parent_id: int, name: str,
              lpos=(0, 0, 0), lscale=(1, 1, 1), layer: int = LAYER_UI_2D, active: bool = True,
              sibling_index: int = -1) -> int:
-    """Add a node. sibling_index=-1 appends (top of render order); 0=first child (bottom)."""
+    """Add a node. sibling_index=-1 appends (top of render order); 0=first child (bottom).
+
+    When ``scene_path`` points at a ``.prefab`` file, the new node also
+    gets its own ``cc.PrefabInfo`` entry (fresh ``fileId``) appended and
+    wired via ``_prefab``. Required for the prefab to instantiate cleanly
+    at runtime — see dogfood-flappy Bug B.
+    """
     s = _load_scene(scene_path)
     if parent_id < 0 or parent_id >= len(s):
         raise IndexError(f"parent_id {parent_id} out of range")
@@ -374,6 +381,9 @@ def add_node(scene_path: str | Path, parent_id: int, name: str,
         children.append(_ref(new_id))
     else:
         children.insert(sibling_index, _ref(new_id))
+    # Prefab files: every node needs its own cc.PrefabInfo. Noop for .scene.
+    if str(scene_path).endswith(".prefab"):
+        _ensure_node_prefab_info(s, new_id)
     _save_scene(scene_path, s)
     return new_id
 
@@ -757,7 +767,12 @@ def delete_node(scene_path: str | Path, node_id: int) -> None:
 
 
 def duplicate_node(scene_path: str | Path, node_id: int, new_name: str | None = None) -> int:
-    """Shallow-copy a node (no children or components are duplicated)."""
+    """Shallow-copy a node (no children or components are duplicated).
+
+    On ``.prefab`` files the duplicate gets a fresh ``cc.PrefabInfo`` so
+    it doesn't share the source's ``fileId`` — otherwise two siblings
+    would claim the same prefab-instance identity.
+    """
     s = _load_scene(scene_path)
     src = s[node_id]
     if src.get("__type__") != "cc.Node":
@@ -769,12 +784,18 @@ def duplicate_node(scene_path: str | Path, node_id: int, new_name: str | None = 
     dup["_id"] = _nid("dup")
     dup["_children"] = []
     dup["_components"] = []
+    # Clear the shallow-copied _prefab ref so the prefab branch mints a
+    # fresh PrefabInfo rather than aliasing the source's.
+    if str(scene_path).endswith(".prefab"):
+        dup["_prefab"] = None
     s.append(dup)
     new_id = len(s) - 1
     parent_ref = dup.get("_parent")
     if parent_ref:
         parent = s[parent_ref["__id__"]]
         parent.setdefault("_children", []).append(_ref(new_id))
+    if str(scene_path).endswith(".prefab"):
+        _ensure_node_prefab_info(s, new_id)
     _save_scene(scene_path, s)
     return new_id
 

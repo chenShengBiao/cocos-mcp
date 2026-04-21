@@ -16,6 +16,7 @@ from ..types import BatchOpsResult
 from ._helpers import (
     LAYER_UI_2D,
     _attach_component,
+    _ensure_node_prefab_info,
     _load_scene,
     _make_camera,
     _make_graphics,
@@ -78,6 +79,7 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
         add_component (generic — pass type_name + props)
     """
     s = _load_scene(scene_path)
+    is_prefab = str(scene_path).endswith(".prefab")
     results: list[Any] = []
 
     def resolve(val):
@@ -112,6 +114,9 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                     children.append(_ref(new_id))
                 else:
                     children.insert(si, _ref(new_id))
+                # Prefab files: give every node its own cc.PrefabInfo.
+                if is_prefab:
+                    _ensure_node_prefab_info(s, new_id)
                 results.append(new_id)
 
             elif action == "add_uitransform":

@@ -148,12 +148,15 @@ def test_audio_controller_persists_to_localstorage(tmp_path: Path):
     assert "try" in source and "catch" in source
 
 
-def test_audio_controller_idempotent_recall_gets_new_uuid(tmp_path: Path):
+def test_audio_controller_idempotent_recall_preserves_uuid(tmp_path: Path):
+    """Bug A fix: re-scaffolding preserves the UUID so the caller can
+    regenerate the file (e.g. after tweaking a constant in the source
+    template) without breaking any already-attached scene components."""
     proj = _make_project(tmp_path)
     first = scaffold_audio_controller(str(proj))
     second = scaffold_audio_controller(str(proj))
-    assert first["uuid_standard"] != second["uuid_standard"]
-    assert first["uuid_compressed"] != second["uuid_compressed"]
+    assert first["uuid_standard"] == second["uuid_standard"]
+    assert first["uuid_compressed"] == second["uuid_compressed"]
 
 
 def test_audio_controller_attaches_to_scene(tmp_path: Path):

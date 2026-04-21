@@ -6,7 +6,59 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Total: **175 tools** (was 80) · **557 tests** (was 45) · **0 mypy / ruff errors**.
+Total: **180 tools** (was 80) · **688 tests** (was 45) · **0 mypy / ruff errors**.
+
+### Fixed — Dogfood-Flappy HIGH-ROI bugs (Bug A + Bug B)
+
+The first full dogfood run (building a Flappy Bird, report at
+``docs/dogfood-flappy-report.md``) surfaced two silent-corruption bugs
+in the most-used tools. Both are now fixed with regression tests.
+
+- **Bug A — ``cocos_add_script`` reassigned UUID on overwrite.**
+  Rewriting a .ts file (a high-frequency operation — agents edit a
+  field and re-save) silently minted a new UUID, which rewrote the
+  ``.ts.meta`` sidecar. Every scene that already referenced that
+  script by its compressed UUID immediately became a no-op component
+  at runtime. The fix: when no explicit ``uuid=`` is passed and a
+  ``.ts.meta`` already exists, preserve its UUID and only update the
+  source. Callers that genuinely want to fork the asset still pass
+  ``uuid=<new>`` explicitly. Return value gains a ``created: bool``
+  field to signal whether the UUID was freshly minted or preserved.
+  Corrupt-meta recovery stays automatic — unreadable JSON falls back
+  to a fresh mint so a partial-write can't permanently poison the
+  asset. (``cocos/project/assets.py::add_script``.)
+
+- **Bug B — ``add_node`` on a ``.prefab`` file skipped PrefabInfo for
+  children.** A prefab requires every node to have its own
+  ``cc.PrefabInfo`` entry with a unique ``fileId`` — Creator uses those
+  ids to reconcile per-instance overrides. The previous code left
+  child nodes with ``_prefab: null`` (the default ``_make_node``
+  shape, correct for scene nodes, malformed inside a prefab). Result:
+  the prefab would either refuse to instantiate or silently lose
+  overrides depending on engine version. Fix detects ``.prefab``
+  suffix and auto-appends a fresh PrefabInfo per node. Covers
+  ``add_node``, ``batch_ops.add_node``, ``duplicate_node``, and the
+  post-fix path of ``save_subtree_as_prefab`` (which previously only
+  emitted a single PrefabInfo for the root).
+
+### Added — ``cocos_add_and_attach_script`` composite (179 → 180 tools)
+
+Single-call wrapper for the 3-step dance agents ran on every script
+attach (write file → compress UUID → attach to scene node):
+
+```
+r = cocos_add_and_attach_script(project, "Bird", source,
+                                 scene, bird_node_id, props=...)
+# r["component_id"], r["uuid_compressed"], r["uuid_standard"], r["created"]
+```
+
+The two same-named ``cocos_add_script`` tools (project-level file
+writer vs scene-level component attacher) were the biggest trip-
+hazard in the dogfood — agents occasionally passed the standard UUID
+to the scene attacher and got a silently-broken component. This
+composite names the intent and returns both forms of the UUID so the
+caller never has to re-derive the compressed one. (``cocos/composites.py``,
+exposed as MCP tool in ``cocos/tools/composites.py``.)
 
 ### Added — Gameplay scaffolds (171 → 175 tools)
 

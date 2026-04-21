@@ -340,12 +340,32 @@ def save_subtree_as_prefab(scene_path: str | Path,
     # --- (4) Prefab structure. cloned[0] is the root cc.Node because we
     # put root_node_id first in ``ordered`` — it lives at array index 1
     # after the cc.Prefab asset wrapper.
+    #
+    # Every cc.Node inside the prefab needs its own cc.PrefabInfo with a
+    # unique fileId (dogfood-flappy Bug B). We emit one PrefabInfo per
+    # cloned cc.Node, pack them contiguously after the cloned region,
+    # and wire each node's _prefab field to its matching PrefabInfo index.
     new_prefab_uuid = prefab_uuid or new_uuid()
     root_name = cloned[0].get("_name") or "Prefab"
-
-    prefab_info_idx = len(cloned) + 1  # index of cc.PrefabInfo, written last
     cloned[0]["_parent"] = None           # prefab root has no parent
-    cloned[0]["_prefab"] = {"__id__": prefab_info_idx}
+
+    pi_base = len(cloned) + 1  # first PrefabInfo sits right after the cloned slab
+    prefab_infos: list[dict] = []
+    pi_cursor = 0
+    for new_idx, obj in enumerate(cloned):
+        if not isinstance(obj, dict) or obj.get("__type__") != "cc.Node":
+            continue
+        pi_idx = pi_base + pi_cursor
+        # Root gets the prefab's authoring uuid so it round-trips through
+        # the Creator importer unchanged; children each get a fresh uuid
+        # so their prefab-instance identity is unique.
+        fileid = new_prefab_uuid if new_idx == 0 else new_uuid()
+        prefab_infos.append({
+            "__type__": "cc.PrefabInfo",
+            "fileId": fileid,
+        })
+        obj["_prefab"] = {"__id__": pi_idx}
+        pi_cursor += 1
 
     prefab_asset = {
         "__type__": "cc.Prefab",
@@ -357,12 +377,8 @@ def save_subtree_as_prefab(scene_path: str | Path,
         "asyncLoadAssets": False,
         "persistent": False,
     }
-    prefab_info = {
-        "__type__": "cc.PrefabInfo",
-        "fileId": new_prefab_uuid,
-    }
 
-    output = [prefab_asset] + cloned + [prefab_info]
+    output = [prefab_asset] + cloned + prefab_infos
 
     prefab_path = Path(prefab_path)
     prefab_path.parent.mkdir(parents=True, exist_ok=True)

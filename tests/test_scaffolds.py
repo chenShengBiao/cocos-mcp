@@ -94,14 +94,17 @@ def test_scaffold_input_custom_rel_path(tmp_path: Path):
     assert (proj / res["rel_path"]).exists()
 
 
-def test_scaffold_input_idempotent_recall_gets_new_uuid(tmp_path: Path):
-    """add_script mints a fresh UUID on every call; regenerating the scaffold
-    to the same rel_path must therefore return a DIFFERENT uuid each time."""
+def test_scaffold_input_idempotent_recall_preserves_uuid(tmp_path: Path):
+    """Regenerating the same scaffold must PRESERVE the UUID (Bug A fix) —
+    any scene that already references this script by compressed UUID keeps
+    resolving. Agents routinely re-run scaffolds after editing a parameter,
+    and the prior behavior (fresh UUID every call) silently broke every
+    attached component."""
     proj = _make_project(tmp_path)
     first = sc.scaffold_input_abstraction(str(proj))
     second = sc.scaffold_input_abstraction(str(proj))
-    assert first["uuid_standard"] != second["uuid_standard"]
-    assert first["uuid_compressed"] != second["uuid_compressed"]
+    assert first["uuid_standard"] == second["uuid_standard"]
+    assert first["uuid_compressed"] == second["uuid_compressed"]
 
 
 def test_scaffold_input_attaches_to_scene(tmp_path: Path):
@@ -171,12 +174,14 @@ def test_scaffold_score_custom_rel_path(tmp_path: Path):
     assert (proj / res["rel_path"]).exists()
 
 
-def test_scaffold_score_idempotent_recall_gets_new_uuid(tmp_path: Path):
+def test_scaffold_score_idempotent_recall_preserves_uuid(tmp_path: Path):
+    """Bug A fix: re-scaffolding over the same rel_path preserves the
+    UUID so attached scene components keep resolving."""
     proj = _make_project(tmp_path)
     first = sc.scaffold_score_system(str(proj))
     second = sc.scaffold_score_system(str(proj))
-    assert first["uuid_standard"] != second["uuid_standard"]
-    assert first["uuid_compressed"] != second["uuid_compressed"]
+    assert first["uuid_standard"] == second["uuid_standard"]
+    assert first["uuid_compressed"] == second["uuid_compressed"]
 
 
 def test_scaffold_score_attaches_to_scene(tmp_path: Path):

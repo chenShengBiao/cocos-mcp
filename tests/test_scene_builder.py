@@ -332,3 +332,158 @@ class TestNewComponents:
         assert evt_obj["handler"] == "onRestart"
         v = validate_scene(path)
         assert v["valid"]
+
+
+# ========================================================================
+# Bug B regression: add_node on .prefab files must wire cc.PrefabInfo per
+# child. Dogfood-flappy surfaced this — children were written with
+# _prefab: null and no sibling PrefabInfo entry, leaving the prefab
+# structurally malformed for the Cocos runtime.
+# ========================================================================
+
+
+class TestPrefabChildPrefabInfo:
+    def _new_prefab(self, tmp_path):
+        from cocos.scene_builder import create_prefab
+        p = tmp_path / "Pipe.prefab"
+        info = create_prefab(str(p), root_name="Pipe")
+        return str(p), info
+
+    def test_add_node_on_prefab_writes_prefab_info(self, tmp_path):
+        """Child node added to a .prefab must have its own cc.PrefabInfo
+        with a unique fileId — Cocos runtime reconciles per-instance
+        overrides via those ids."""
+        prefab_path, info = self._new_prefab(tmp_path)
+        root_id = info["root_node_id"]
+        # Grab the root's PrefabInfo so we can assert the child gets a
+        # different fileId.
+        with open(prefab_path) as f:
+            before = json.load(f)
+        root_pi_idx = before[root_id]["_prefab"]["__id__"]
+        root_fileid = before[root_pi_idx]["fileId"]
+
+        child_id = add_node(prefab_path, root_id, "PipeTop")
+
+        with open(prefab_path) as f:
+            after = json.load(f)
+        child = after[child_id]
+        assert child["_prefab"] is not None, "child must have _prefab wired"
+        pi_idx = child["_prefab"]["__id__"]
+        pi = after[pi_idx]
+        assert pi["__type__"] == "cc.PrefabInfo"
+        assert pi["fileId"], "PrefabInfo must carry a fileId"
+        assert pi["fileId"] != root_fileid, \
+            "child PrefabInfo.fileId must be unique (else identity collides with root)"
+
+    def test_add_node_on_scene_no_prefab_info(self, tmp_path):
+        """Scene nodes must NOT get a PrefabInfo — only prefab nodes do.
+        Regression guard: don't accidentally widen the fix to all scenes."""
+        scene = str(tmp_path / "main.scene")
+        info = create_empty_scene(scene)
+        before_count = 0
+        with open(scene) as f:
+            data = json.load(f)
+            before_count = sum(1 for o in data if o.get("__type__") == "cc.PrefabInfo")
+
+        add_node(scene, info["canvas_node_id"], "Plain")
+
+        with open(scene) as f:
+            data = json.load(f)
+        after_count = sum(1 for o in data if o.get("__type__") == "cc.PrefabInfo")
+        # Scene already has ONE PrefabInfo (the scene root's own) — it
+        # should be unchanged. Adding a plain scene node must not create
+        # a new one.
+        assert after_count == before_count
+
+    def test_batch_add_node_on_prefab_writes_prefab_info(self, tmp_path):
+        """The batch-ops variant follows the same rule as the direct
+        add_node. Regression: it was easy to patch one path and forget
+        the other."""
+        prefab_path, info = self._new_prefab(tmp_path)
+        root_id = info["root_node_id"]
+
+        res = batch_ops(prefab_path, [
+            {"op": "add_node", "name": "PipeTop", "parent_id": root_id},
+            {"op": "add_node", "name": "PipeBottom", "parent_id": root_id},
+        ])
+        top_id, bottom_id = res["results"][0], res["results"][1]
+
+        with open(prefab_path) as f:
+            data = json.load(f)
+        for nid in (top_id, bottom_id):
+            assert data[nid]["_prefab"] is not None
+            pi_idx = data[nid]["_prefab"]["__id__"]
+            assert data[pi_idx]["__type__"] == "cc.PrefabInfo"
+            assert data[pi_idx]["fileId"]
+        # Two children → two distinct fileIds
+        top_fid = data[data[top_id]["_prefab"]["__id__"]]["fileId"]
+        bot_fid = data[data[bottom_id]["_prefab"]["__id__"]]["fileId"]
+        assert top_fid != bot_fid
+
+    def test_duplicate_node_on_prefab_gets_fresh_prefab_info(self, tmp_path):
+        """Duplicating a node inside a prefab must mint a fresh
+        PrefabInfo — aliasing the source's fileId would collide two
+        prefab-instance identities in the same file."""
+        prefab_path, info = self._new_prefab(tmp_path)
+        root_id = info["root_node_id"]
+        child_id = add_node(prefab_path, root_id, "PipeOrig")
+        with open(prefab_path) as f:
+            data = json.load(f)
+        src_fileid = data[data[child_id]["_prefab"]["__id__"]]["fileId"]
+
+        dup_id = duplicate_node(prefab_path, child_id, new_name="PipeCopy")
+
+        with open(prefab_path) as f:
+            data = json.load(f)
+        dup_fileid = data[data[dup_id]["_prefab"]["__id__"]]["fileId"]
+        assert dup_fileid != src_fileid
+
+    def test_save_subtree_as_prefab_wires_every_node(self, tmp_path):
+        """save_subtree_as_prefab had the same missing-PrefabInfo bug for
+        extracted child nodes. A subtree with N nodes should produce N
+        PrefabInfo entries, all wired, root using the main uuid."""
+        from cocos.scene_builder import save_subtree_as_prefab
+        scene = str(tmp_path / "main.scene")
+        info = create_empty_scene(scene)
+        parent = add_node(scene, info["canvas_node_id"], "Enemy")
+        child_a = add_node(scene, parent, "A")
+        child_b = add_node(scene, parent, "B")
+
+        prefab_path = str(tmp_path / "Enemy.prefab")
+        res = save_subtree_as_prefab(scene, parent, prefab_path)
+
+        with open(prefab_path) as f:
+            data = json.load(f)
+        node_ids = [i for i, o in enumerate(data) if o.get("__type__") == "cc.Node"]
+        pi_ids = [i for i, o in enumerate(data) if o.get("__type__") == "cc.PrefabInfo"]
+        assert len(node_ids) == 3, f"expected 3 cc.Node entries, got {len(node_ids)}"
+        assert len(pi_ids) == 3, f"expected 3 cc.PrefabInfo entries, got {len(pi_ids)}"
+        # Each node points at a PrefabInfo
+        pi_fids: list[str] = []
+        for nid in node_ids:
+            prefab_ref = data[nid]["_prefab"]
+            assert prefab_ref is not None, f"node {data[nid]['_name']} missing _prefab"
+            pi_idx = prefab_ref["__id__"]
+            assert data[pi_idx]["__type__"] == "cc.PrefabInfo"
+            pi_fids.append(data[pi_idx]["fileId"])
+        # All PrefabInfo fileIds unique
+        assert len(set(pi_fids)) == 3
+        # Root's fileId matches the prefab uuid (round-trips through Creator importer)
+        root_nid = node_ids[0]  # cloned[0] is root per save_subtree_as_prefab contract
+        root_pi = data[root_nid]["_prefab"]["__id__"]
+        assert data[root_pi]["fileId"] == res["prefab_uuid"]
+
+    def test_add_node_idempotent_wiring(self, tmp_path):
+        """Calling _ensure_node_prefab_info on a node that already has a
+        valid PrefabInfo must be a no-op, not append a duplicate."""
+        from cocos.scene_builder._helpers import _ensure_node_prefab_info, _load_scene
+        prefab_path, info = self._new_prefab(tmp_path)
+        root_id = info["root_node_id"]
+        child_id = add_node(prefab_path, root_id, "Child")
+
+        s = _load_scene(prefab_path)
+        before_len = len(s)
+        pi_idx_first = _ensure_node_prefab_info(s, child_id)
+        pi_idx_second = _ensure_node_prefab_info(s, child_id)
+        assert pi_idx_first == pi_idx_second
+        assert len(s) == before_len  # no new PrefabInfo appended on re-call

@@ -20,6 +20,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ..uuid_util import new_uuid
+
 # Compact mode trims `indent=2` to `separators=(",", ":")` for ~35% faster
 # scene-file writes on big scenes (500+ objects). Cocos Creator parses both
 # fine; the only thing you lose is git-diff-friendly formatting. Enable
@@ -296,6 +298,39 @@ def _make_script_component(script_uuid_compressed: str, node_idx: int, props: di
         # Convert any {"__id__": N} hints already passed
         obj.update(props)
     return obj
+
+
+def _ensure_node_prefab_info(s: list, node_id: int, fileid: str | None = None) -> int:
+    """Ensure a cc.Node inside a .prefab-shaped array has its own cc.PrefabInfo.
+
+    Every node in a Cocos prefab needs its own ``cc.PrefabInfo`` entry with
+    a unique ``fileId`` — Creator uses those ids to reconcile per-instance
+    overrides against the authoring .prefab. A node left with ``_prefab: null``
+    (the default ``_make_node`` shape, correct for scene nodes) becomes
+    malformed inside a prefab and may refuse to instantiate or silently
+    lose overrides depending on engine version. See dogfood-flappy Bug B.
+
+    Idempotent: if the node already points at a valid PrefabInfo, the
+    existing index is returned. Otherwise a fresh PrefabInfo is appended
+    (with a generated ``fileId`` when none supplied) and the node's
+    ``_prefab`` field is wired to it.
+
+    Returns the array index of the (new or pre-existing) cc.PrefabInfo.
+    """
+    node = s[node_id]
+    existing = node.get("_prefab")
+    if isinstance(existing, dict) and "__id__" in existing:
+        pi_idx = existing["__id__"]
+        if 0 <= pi_idx < len(s) and isinstance(s[pi_idx], dict) \
+                and s[pi_idx].get("__type__") == "cc.PrefabInfo":
+            return pi_idx
+    s.append({
+        "__type__": "cc.PrefabInfo",
+        "fileId": fileid or new_uuid(),
+    })
+    pi_idx = len(s) - 1
+    node["_prefab"] = _ref(pi_idx)
+    return pi_idx
 
 
 # ----------- scene-globals helpers -----------

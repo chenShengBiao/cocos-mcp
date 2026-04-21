@@ -57,6 +57,56 @@ def test_add_script_appends_ts_extension(tmp_path: Path):
     assert res["rel_path"].endswith(".ts")
 
 
+def test_add_script_idempotent_preserves_uuid_on_overwrite(tmp_path: Path):
+    """Bug A regression: rewriting the same .ts path must NOT mint a new
+    UUID. Scenes reference scripts by compressed UUID, so a silent
+    reassignment on every source edit broke every attached component.
+    Dogfood-flappy report surfaced this — agents normally re-run
+    ``add_script`` to patch in a new field and expect the script to keep
+    working.
+    """
+    proj = _make_project_skeleton(tmp_path / "p")
+    first = cp.add_script(str(proj), "Foo", "export class Foo { a = 1; }")
+    assert first["created"] is True
+
+    second = cp.add_script(str(proj), "Foo", "export class Foo { a = 1; b = 2; }")
+    assert second["uuid"] == first["uuid"], \
+        "UUID should survive rewrite — scenes reference by compressed UUID"
+    assert second["created"] is False
+    # The .ts itself must reflect the new source; only the meta is sticky.
+    assert "b = 2" in Path(second["path"]).read_text()
+    # Meta on disk must still contain the original UUID.
+    meta = json.loads(Path(second["path"] + ".meta").read_text())
+    assert meta["uuid"] == first["uuid"]
+
+
+def test_add_script_explicit_uuid_forces_fresh_identity(tmp_path: Path):
+    """Escape hatch: callers can still force a new UUID by passing uuid=.
+    Mirrors Cocos "Reveal in Finder → delete .meta" workflow."""
+    proj = _make_project_skeleton(tmp_path / "p")
+    first = cp.add_script(str(proj), "Forked", "// v1")
+    forced = "11111111-2222-3333-4444-555555555555"
+    second = cp.add_script(str(proj), "Forked", "// v2", uuid=forced)
+    assert second["uuid"] == forced
+    assert second["uuid"] != first["uuid"]
+    assert second["created"] is True
+
+
+def test_add_script_corrupt_meta_remints(tmp_path: Path):
+    """A partial-write .ts.meta that isn't valid JSON should trigger a
+    fresh mint on next overwrite, not a crash. Recovery path stays
+    automatic so a prior tool error doesn't permanently poison the asset.
+    """
+    proj = _make_project_skeleton(tmp_path / "p")
+    first = cp.add_script(str(proj), "Flaky", "// v1")
+    # Corrupt the meta sidecar
+    Path(first["path"] + ".meta").write_text("{not json")
+
+    second = cp.add_script(str(proj), "Flaky", "// v2")
+    assert second["created"] is True
+    assert second["uuid"] != first["uuid"]
+
+
 # ----------- add_image -----------
 
 def test_add_image_default_textures_dir(tmp_path: Path):

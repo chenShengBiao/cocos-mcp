@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from . import (
     build,
+    composites,
     core,
     interact,
     media,
@@ -31,6 +32,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 __all__ = [
     "build",
+    "composites",
     "core",
     "interact",
     "media",
@@ -53,6 +55,7 @@ def register_all(mcp: FastMCP) -> None:
     rendering_3d.register(mcp)
     media.register(mcp)
     ui_patterns.register(mcp)
+    composites.register(mcp)
     build.register(mcp)
     interact.register(mcp)
     scaffolds.register(mcp)

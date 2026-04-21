@@ -144,12 +144,15 @@ def test_camera_follow_bounds_clamp(tmp_path: Path):
     assert "Math.max" in source and "Math.min" in source
 
 
-def test_camera_follow_idempotent_recall_gets_new_uuid(tmp_path: Path):
+def test_camera_follow_idempotent_recall_preserves_uuid(tmp_path: Path):
+    """Bug A fix: re-scaffolding preserves the UUID so Camera nodes that
+    already reference this script by compressed UUID keep resolving
+    after the file is overwritten."""
     proj = _make_project(tmp_path)
     first = scaffold_camera_follow(str(proj))
     second = scaffold_camera_follow(str(proj))
-    assert first["uuid_standard"] != second["uuid_standard"]
-    assert first["uuid_compressed"] != second["uuid_compressed"]
+    assert first["uuid_standard"] == second["uuid_standard"]
+    assert first["uuid_compressed"] == second["uuid_compressed"]
 
 
 def test_camera_follow_attaches_to_scene(tmp_path: Path):
