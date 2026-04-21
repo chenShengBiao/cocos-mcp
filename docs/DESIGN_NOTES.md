@@ -1,6 +1,18 @@
-# Changelog
+# Design Notes
 
-All notable changes to **cocos-mcp** are documented here.
+> **This file used to be `CHANGELOG.md`.** Moved here in v1.2-dev: release
+> notes live in [Gitee Releases](https://gitee.com/csbcsb/cocos-mcp/releases)
+> going forward. What stays here is the **engineering rationale** — dogfood
+> findings, Cocos 3.8 field-drift fixes, Bug A/B regression context,
+> architecture decisions — things that don't fit in release notes or `git log`
+> one-liners but are worth preserving when future-you asks "why is this field
+> `1` not `0`?".
+>
+> No longer actively maintained in the "Unreleased" sense. Entries below
+> dated before the split are preserved verbatim.
+
+---
+
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 

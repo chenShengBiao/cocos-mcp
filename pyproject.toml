@@ -30,7 +30,6 @@ dev = [
 
 [project.urls]
 Repository = "https://gitee.com/csbcsb/cocos-mcp"
-Changelog = "https://gitee.com/csbcsb/cocos-mcp/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=68.0"]
