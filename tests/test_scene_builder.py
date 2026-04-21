@@ -429,6 +429,115 @@ class TestBatchOps:
         assert isinstance(first, dict)
         assert "error" in first
 
+    # ------- direct/batch param parity (dogfood v2 follow-up) -------
+
+    def test_add_node_accepts_lpos_tuple_matching_direct_api(self):
+        """Batch add_node now accepts ``lpos=[x, y, z]`` — the same
+        tuple form ``sb.add_node`` takes. Pre-fix it only read
+        ``pos_x/y/z`` scalars; agents used to the direct API handed
+        over ``lpos`` and silently got (0, 0, 0). See dogfood-flappy
+        v2 report."""
+        path, info = _tmp_scene()
+        res = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"],
+             "name": "N", "lpos": [100, 50, -5]},
+        ])
+        nid = res["results"][0]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[nid]["_lpos"] == {
+            "__type__": "cc.Vec3", "x": 100, "y": 50, "z": -5,
+        }
+
+    def test_add_node_accepts_lscale_tuple(self):
+        """Batch add_node pre-fix dropped ``lscale`` entirely —
+        every batched node came out at (1, 1, 1) regardless of op
+        input. Accepts ``lscale`` now."""
+        path, info = _tmp_scene()
+        res = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"],
+             "name": "S", "lscale": [2, 3, 1]},
+        ])
+        nid = res["results"][0]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[nid]["_lscale"] == {
+            "__type__": "cc.Vec3", "x": 2, "y": 3, "z": 1,
+        }
+
+    def test_add_node_legacy_scalars_still_work(self):
+        """Backward-compat: the pre-fix ``pos_x/pos_y/pos_z`` +
+        ``sx/sy/sz`` scalars keep working for callers that already
+        encoded against the old batch shape."""
+        path, info = _tmp_scene()
+        res = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"],
+             "name": "L", "pos_x": 20, "pos_y": 40,
+             "sx": 1.5, "sy": 1.5, "sz": 1.0},
+        ])
+        nid = res["results"][0]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[nid]["_lpos"]["x"] == 20
+        assert data[nid]["_lpos"]["y"] == 40
+        assert data[nid]["_lscale"]["x"] == 1.5
+
+    def test_add_node_lpos_tuple_wins_over_scalars(self):
+        """When both forms are set, the tuple takes precedence —
+        keeps the resolution rule deterministic and matches the
+        direct API's exclusive use of ``lpos``."""
+        path, info = _tmp_scene()
+        res = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"],
+             "name": "B", "lpos": [99, 77, 0], "pos_x": 1, "pos_y": 2},
+        ])
+        nid = res["results"][0]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[nid]["_lpos"]["x"] == 99
+        assert data[nid]["_lpos"]["y"] == 77
+
+    def test_add_node_lpos_short_tuple_defaults_z_to_zero(self):
+        """``lpos=[x, y]`` is a common 2D convenience — z defaults
+        to 0 rather than erroring out."""
+        path, info = _tmp_scene()
+        res = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"],
+             "name": "P", "lpos": [10, 20]},
+        ])
+        nid = res["results"][0]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[nid]["_lpos"] == {
+            "__type__": "cc.Vec3", "x": 10, "y": 20, "z": 0,
+        }
+
+    def test_set_position_accepts_lpos_tuple(self):
+        path, info = _tmp_scene()
+        parent = info["canvas_node_id"]
+        res = batch_ops(path, [
+            {"op": "add_node", "parent_id": parent, "name": "M"},
+            {"op": "set_position", "node_id": "$0", "lpos": [30, 40, 0]},
+        ])
+        nid = res["results"][0]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[nid]["_lpos"]["x"] == 30
+        assert data[nid]["_lpos"]["y"] == 40
+
+    def test_set_scale_accepts_lscale_tuple(self):
+        path, info = _tmp_scene()
+        parent = info["canvas_node_id"]
+        res = batch_ops(path, [
+            {"op": "add_node", "parent_id": parent, "name": "G"},
+            {"op": "set_scale", "node_id": "$0", "lscale": [0.5, 0.5, 1]},
+        ])
+        nid = res["results"][0]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[nid]["_lscale"]["x"] == 0.5
+        assert data[nid]["_lscale"]["y"] == 0.5
+
     def test_attach_script_auto_compresses_in_batch(self):
         """Passing the 36-char standard UUID to batch attach_script now
         auto-compresses like the direct scene_builder.add_script. Regression:

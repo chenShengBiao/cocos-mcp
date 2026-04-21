@@ -338,7 +338,7 @@ cocos-mcp/
 │       ├── scaffolds.py              # 6 个游戏逻辑脚手架工具
 │       └── build.py                  # 构建 / 预览 / 平台-发布配置 / 构建后补丁
 ├── examples/                         # 3 个一键示例
-├── tests/                            # 734 个 pytest 单元测试
+├── tests/                            # 741 个 pytest 单元测试
 ├── .github/workflows/test.yml        # Ubuntu / macOS / Windows × Python 3.11 / 3.12
 ├── Dockerfile
 ├── CHANGELOG.md
@@ -347,7 +347,7 @@ cocos-mcp/
 
 ## 质量保障
 
-- **734 个 pytest 测试**，本地 < 20s 跑完。覆盖：UUID、meta、scene_builder、batch、8 个 Joint2D、**3D 物理（18 个）**、**3D 渲染（10 个）**、prefab create/instantiate/**save_subtree**、**prefab 子节点 PrefabInfo 自动挂接（Bug B regression）**、**add_script 幂等 UUID 保持（Bug A regression）**、**add_and_attach_script 复合工具**、所有发布工具、AI 素材生成（HTTP mock）、chroma key、跨平台预览、**结构化错误分类器 + TS 诊断解析**、**TypedDict 契约漂移检测**、**场景读缓存命中 / mtime 失效 / LRU 淘汰**、**引擎模块 audit**、**构建后补丁 CRUD + 三种 kind + 路径注入防御 + drift 保护**、**Creator 安装 env var / PATH 探测**、**UI token 5 主题 + 8 条 lint 规则**、**Playwright 闭环反馈（mocked）+ 视觉 diff**、**6 个游戏脚手架（15 种 kind 组合）+ .ts 模板生成**。
+- **741 个 pytest 测试**，本地 < 15s 跑完。覆盖：UUID、meta、scene_builder、batch、8 个 Joint2D、**3D 物理（18 个）**、**3D 渲染（10 个）**、prefab create/instantiate/**save_subtree**、**prefab 子节点 PrefabInfo 自动挂接（Bug B regression）**、**add_script 幂等 UUID 保持（Bug A regression）**、**add_and_attach_script 复合工具**、所有发布工具、AI 素材生成（HTTP mock）、chroma key、跨平台预览、**结构化错误分类器 + TS 诊断解析**、**TypedDict 契约漂移检测**、**场景读缓存命中 / mtime 失效 / LRU 淘汰**、**引擎模块 audit**、**构建后补丁 CRUD + 三种 kind + 路径注入防御 + drift 保护**、**Creator 安装 env var / PATH 探测**、**UI token 5 主题 + 8 条 lint 规则**、**Playwright 闭环反馈（mocked）+ 视觉 diff**、**6 个游戏脚手架（15 种 kind 组合）+ .ts 模板生成**。
 - 所有 3D 组件字段默认值**逐一对齐 cocos-engine v3.8.6 源码**（如 `ERigidBodyType.DYNAMIC=1 / STATIC=2 / KINEMATIC=4` 是 bitmask 不是 0/1/2，已用回归测试锁定）。
 - **CI**：GitHub Actions matrix —— Ubuntu / macOS / Windows × Python 3.11 / 3.12，每个组合都跑 `ruff` + `mypy` + `pytest`。
 - **类型检查**：`mypy cocos/` 0 errors。

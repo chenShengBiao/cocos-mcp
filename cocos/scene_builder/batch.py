@@ -37,6 +37,52 @@ from ._helpers import (
 )
 
 
+def _resolve_lpos(op: dict) -> tuple[float, float, float]:
+    """Read local position from either ``lpos=(x, y, z)`` (matching the
+    direct ``sb.add_node`` signature) or the three scalar fields
+    ``pos_x`` / ``pos_y`` / ``pos_z`` (the historical batch-ops form).
+
+    Both accepted for backward compat; tuple wins when both present.
+    Missing ``z`` in the tuple defaults to 0 — scene-UI code rarely
+    cares about z, so ``lpos=(100, 50)`` is the nicest shorthand.
+    """
+    lpos = op.get("lpos")
+    if lpos is not None:
+        x = lpos[0] if len(lpos) > 0 else 0
+        y = lpos[1] if len(lpos) > 1 else 0
+        z = lpos[2] if len(lpos) > 2 else 0
+        return (x, y, z)
+    return (op.get("pos_x", 0), op.get("pos_y", 0), op.get("pos_z", 0))
+
+
+def _resolve_lscale(op: dict) -> tuple[float, float, float]:
+    """Same tuple-or-scalars rule as ``_resolve_lpos`` but for scale:
+    accepts ``lscale=(sx, sy, sz)`` OR ``sx`` / ``sy`` / ``sz`` scalars.
+    Missing entries default to 1 (identity scale).
+    """
+    lscale = op.get("lscale")
+    if lscale is not None:
+        sx = lscale[0] if len(lscale) > 0 else 1
+        sy = lscale[1] if len(lscale) > 1 else 1
+        sz = lscale[2] if len(lscale) > 2 else 1
+        return (sx, sy, sz)
+    return (op.get("sx", 1), op.get("sy", 1), op.get("sz", 1))
+
+
+def _resolve_xyz(op: dict) -> tuple[float, float, float]:
+    """Read a generic (x, y, z) triplet from either ``lpos=(...)`` OR
+    individual ``x`` / ``y`` / ``z`` scalars. Used by ``set_position``
+    where the historical keys were un-prefixed ``x/y/z``.
+    """
+    lpos = op.get("lpos")
+    if lpos is not None:
+        x = lpos[0] if len(lpos) > 0 else 0
+        y = lpos[1] if len(lpos) > 1 else 0
+        z = lpos[2] if len(lpos) > 2 else 0
+        return (x, y, z)
+    return (op.get("x", 0), op.get("y", 0), op.get("z", 0))
+
+
 def _make_generic(nid: int, type_name: str, prefix: str, props: dict) -> dict:
     """In-memory factory for components without a dedicated _make_* helper.
 
@@ -123,10 +169,17 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
         action = op.get("op", "")
         try:
             if action == "add_node":
+                # Accept both direct-API shape (``lpos=(x,y,z)`` +
+                # ``lscale=(sx,sy,sz)`` tuples, matching sb.add_node)
+                # and historical batch shape (``pos_x/y/z`` + ``sx/sy/sz``
+                # scalars). Tuple wins when both supplied. lscale was
+                # completely ignored pre-fix — set_node via batch left
+                # every node at (1,1,1).
                 node = _make_node(
                     op.get("name", f"Node_{i}"),
                     op.get("parent_id", 2),
-                    lpos=(op.get("pos_x", 0), op.get("pos_y", 0), op.get("pos_z", 0)),
+                    lpos=_resolve_lpos(op),
+                    lscale=_resolve_lscale(op),
                     layer=op.get("layer", LAYER_UI_2D),
                     active=op.get("active", True),
                 )
@@ -289,7 +342,8 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 results.append(True)
 
             elif action == "set_position":
-                s[op["node_id"]]["_lpos"] = _vec3(op.get("x", 0), op.get("y", 0), op.get("z", 0))
+                x, y, z = _resolve_xyz(op)
+                s[op["node_id"]]["_lpos"] = _vec3(x, y, z)
                 results.append(True)
 
             elif action == "set_active":
@@ -298,8 +352,8 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
 
             elif action == "set_scale":
                 nid = op["node_id"]
-                s[nid]["_lscale"] = _vec3(
-                    op.get("sx", 1), op.get("sy", 1), op.get("sz", 1))
+                sx, sy, sz = _resolve_lscale(op)
+                s[nid]["_lscale"] = _vec3(sx, sy, sz)
                 results.append(True)
 
             elif action == "set_rotation":

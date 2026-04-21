@@ -6,7 +6,46 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Total: **184 tools** (was 80) · **734 tests** (was 45) · **0 mypy / ruff errors**.
+Total: **184 tools** (was 80) · **741 tests** (was 45) · **0 mypy / ruff errors**.
+
+### Fixed — batch_ops param parity with direct sb.* API (dogfood v2 follow-up)
+
+End-to-end dogfood of Flappy Bird (Cocos Creator 3.8.6 headless
+build + Chromium runtime) confirmed every physics / UI / atlas /
+prefab fix — but uncovered one lingering friction: ``batch_ops``'s
+``add_node`` / ``set_position`` / ``set_scale`` took different
+parameter names than the direct ``sb.add_node`` / ``set_node_*``
+functions. Agents familiar with the direct API handed over
+``lpos=(x, y, z)`` / ``lscale=(sx, sy, sz)`` tuples and silently got
+(0, 0, 0) positioning + (1, 1, 1) scale regardless of op input.
+
+Worse: the batch ``add_node`` never read ``lscale`` at all (neither
+tuple nor scalars), so **every batch-created node came out at the
+engine default scale** — a latent bug unrelated to the naming
+mismatch. Before this fix, there was no way to set initial scale via
+``batch_ops``; only ``set_scale`` as a separate op worked.
+
+Fix: three small helpers (``_resolve_lpos`` / ``_resolve_lscale`` /
+``_resolve_xyz``) accept EITHER form. Tuple wins when both present;
+``lpos=[x, y]`` (2D shorthand) defaults z to 0. The legacy scalar
+form still works identically — no breaking changes for callers that
+were already using the batch shape. Applies to:
+
+* ``add_node`` — ``lpos=[x,y,z]`` / ``lscale=[sx,sy,sz]`` tuples +
+  new ``lscale`` scalar support (sx/sy/sz were previously dropped
+  silently).
+* ``set_position`` — ``lpos=[x,y,z]`` in addition to ``x/y/z``.
+* ``set_scale`` — ``lscale=[sx,sy,sz]`` in addition to ``sx/sy/sz``.
+
+**Tests — 734 → 741 (+7)**
+
+* ``test_add_node_accepts_lpos_tuple_matching_direct_api``
+* ``test_add_node_accepts_lscale_tuple`` (catches the silent-drop bug)
+* ``test_add_node_legacy_scalars_still_work`` (backward-compat)
+* ``test_add_node_lpos_tuple_wins_over_scalars`` (deterministic precedence)
+* ``test_add_node_lpos_short_tuple_defaults_z_to_zero`` (2D shorthand)
+* ``test_set_position_accepts_lpos_tuple``
+* ``test_set_scale_accepts_lscale_tuple``
 
 ### Fixed — AutoAtlas .pac shape + added runtime DynamicAtlas helper (183 → 184 tools)
 

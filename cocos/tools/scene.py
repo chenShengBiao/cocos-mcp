@@ -534,14 +534,25 @@ def register(mcp: FastMCP) -> None:
 
         Supported ops:
           Structural:
-            - {"op": "add_node", "parent_id": N, "name": "...", "pos_x": ..., ...}
+            - {"op": "add_node", "parent_id": N, "name": "...",
+                "lpos": [x, y, z]?, "lscale": [sx, sy, sz]?,
+                "pos_x": ..., "pos_y": ..., "pos_z": ...,
+                "sx": ..., "sy": ..., "sz": ...,
+                "layer": L?, "active": true/false?, "sibling_index": -1?}
+              (``lpos`` / ``lscale`` tuple forms match direct sb.add_node;
+               ``pos_x/y/z`` and ``sx/sy/sz`` scalars are the legacy form.
+               Tuple wins when both supplied. Prior releases silently
+               dropped ``lscale`` — every batch-created node was left
+               at (1,1,1) regardless of op input.)
             - {"op": "attach_script", "node_id": N, "script_uuid_compressed": "...", "props": {...}}
               (36-char standard UUIDs auto-compressed, matching cocos_add_script.)
             - {"op": "link_property", "component_id": N, "prop_name": "...", "target_id": M}
             - {"op": "set_property", "object_id": N, "prop_name": "...", "value": ...}
             - {"op": "set_uuid_property", "object_id": N, "prop_name": "...", "uuid": "..."}
-            - {"op": "set_position", "node_id": N, "x": X, "y": Y, "z": Z}
-            - {"op": "set_scale", "node_id": N, "sx": ..., "sy": ..., "sz": ...}
+            - {"op": "set_position", "node_id": N,
+                "lpos": [x, y, z]? OR "x": ..., "y": ..., "z": ...}
+            - {"op": "set_scale", "node_id": N,
+                "lscale": [sx, sy, sz]? OR "sx": ..., "sy": ..., "sz": ...}
             - {"op": "set_rotation", "node_id": N, "angle_z": deg}
             - {"op": "set_layer", "node_id": N, "layer": L}
             - {"op": "set_active", "node_id": N, "active": true/false}
