@@ -215,15 +215,20 @@ def test_add_physics_body2d_box_shape(tmp_path: Path):
 
     with open(scene) as f:
         data = json.load(f)
-    assert data[r["rigidbody_id"]]["__type__"] == "cc.RigidBody2D"
-    assert data[r["rigidbody_id"]]["type"] == 2
-    assert data[r["rigidbody_id"]]["gravityScale"] == 1.5
-    assert data[r["collider_id"]]["__type__"] == "cc.BoxCollider2D"
-    # `_size` is stored as a plain [w, h] list via add_box_collider2d's
-    # passthrough (no auto-wrap) — matches the current scene-file shape
-    # Creator accepts.
-    assert data[r["collider_id"]]["_size"] == [40, 30]
-    assert data[r["collider_id"]]["_friction"] == 0.1
+    rb = data[r["rigidbody_id"]]
+    assert rb["__type__"] == "cc.RigidBody2D"
+    # Engine serializes with underscore-prefixed backing-field names —
+    # see physics.py module docstring. Pre-fix we wrote non-underscore
+    # versions which the runtime silently ignored.
+    assert rb["_type"] == 2
+    assert rb["_gravityScale"] == 1.5
+    col = data[r["collider_id"]]
+    assert col["__type__"] == "cc.BoxCollider2D"
+    # cc.Size dict (not a [w, h] list — the engine deserializes a list
+    # to a zero-filled Size and the collider silently becomes a 1×1
+    # square).
+    assert col["_size"] == {"__type__": "cc.Size", "width": 40, "height": 30}
+    assert col["_friction"] == 0.1
     assert r["shape"] == "box"
 
 
@@ -243,7 +248,10 @@ def test_add_physics_body2d_circle_shape(tmp_path: Path):
 
 
 def test_add_physics_body2d_polygon_shape(tmp_path: Path):
-    """Polygon shape accepts explicit vertex list."""
+    """Polygon shape accepts explicit vertex list. Each vertex is
+    emitted as a ``cc.Vec2`` dict — engine types ``_points`` as
+    ``Vec2[]``, so raw tuple/list elements deserialize to a
+    zero-filled Vec2 and the polygon degenerates."""
     scene, info = _make_scene(tmp_path)
     node = sb.add_node(scene, info["canvas_node_id"], "Poly")
     triangle = [[0, 40], [-40, -40], [40, -40]]
@@ -254,7 +262,11 @@ def test_add_physics_body2d_polygon_shape(tmp_path: Path):
     with open(scene) as f:
         data = json.load(f)
     assert data[r["collider_id"]]["__type__"] == "cc.PolygonCollider2D"
-    assert data[r["collider_id"]]["_points"] == triangle
+    assert data[r["collider_id"]]["_points"] == [
+        {"__type__": "cc.Vec2", "x": 0, "y": 40},
+        {"__type__": "cc.Vec2", "x": -40, "y": -40},
+        {"__type__": "cc.Vec2", "x": 40, "y": -40},
+    ]
     assert data[r["collider_id"]]["_density"] == 2.0
 
 

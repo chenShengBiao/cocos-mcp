@@ -30,7 +30,7 @@ from ._helpers import (
     _quat,
     _ref,
     _save_scene,
-    _size,
+    _size as _cc_size,
     _vec2,
     _vec3,
     _wrap_props,
@@ -183,22 +183,30 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 results.append(cid)
 
             elif action == "add_rigidbody2d":
+                # Field names mirror cocos-engine 3.8's @serializable
+                # layout — see physics.py module docstring for the full
+                # convention. Mismatches (e.g. "type" instead of "_type")
+                # are silently discarded at deserialization, falling the
+                # body back to its runtime default.
                 nid = op["node_id"]
                 obj = {
                     "__type__": "cc.RigidBody2D", "_name": "", "_objFlags": 0,
                     "node": _ref(nid), "_enabled": True, "__prefab": None,
                     "_id": _nid("rb2"),
+                    # Public @serializable — no underscore.
                     "enabledContactListener": True,
-                    "type": op.get("body_type", 2),
-                    "gravityScale": op.get("gravity_scale", 1.0),
-                    "linearDamping": op.get("linear_damping", 0.0),
-                    "angularDamping": op.get("angular_damping", 0.0),
-                    "fixedRotation": op.get("fixed_rotation", False),
                     "bullet": op.get("bullet", False),
-                    "allowSleep": True,
                     "awakeOnLoad": op.get("awake_on_load", True),
-                    "linearVelocity": _vec2(0, 0),
-                    "angularVelocity": 0.0,
+                    # Private @serializable — underscore prefix.
+                    "_group": op.get("group", 1),
+                    "_type": op.get("body_type", 2),
+                    "_allowSleep": True,
+                    "_gravityScale": op.get("gravity_scale", 1.0),
+                    "_linearDamping": op.get("linear_damping", 0.0),
+                    "_angularDamping": op.get("angular_damping", 0.0),
+                    "_linearVelocity": _vec2(0, 0),
+                    "_angularVelocity": 0.0,
+                    "_fixedRotation": op.get("fixed_rotation", False),
                 }
                 cid = _attach_component(s, nid, obj)
                 results.append(cid)
@@ -214,7 +222,7 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                     "_sensor": op.get("is_sensor", False),
                     "_friction": op.get("friction", 0.2),
                     "_restitution": op.get("restitution", 0.0),
-                    "_size": _size(op.get("width", 100), op.get("height", 100)),
+                    "_size": _cc_size(op.get("width", 100), op.get("height", 100)),
                     "_offset": _vec2(op.get("offset_x", 0), op.get("offset_y", 0)),
                 }
                 cid = _attach_component(s, nid, obj)
@@ -403,24 +411,30 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                     "_sensor": op.get("is_sensor", False),
                     "_friction": op.get("friction", 0.2),
                     "_restitution": op.get("restitution", 0.0),
-                    "_points": pts,
+                    # Engine typing is ``Vec2[]`` — each vertex must be
+                    # a cc.Vec2 dict, not a [x, y] list.
+                    "_points": [_vec2(x, y) for x, y in pts],
                 })
                 cid = _attach_component(s, nid, obj)
                 results.append(cid)
 
             # ---- Joint2D dispatch (Cocos 3.8 — 8 variants) ----
-            # Every joint shares {node, _connectedBody, _collideConnected}
-            # plus type-specific anchor / motor / limit / spring fields.
-            # _joint_base constructs the shared skeleton so each branch
-            # only deals with its own tunables.
+            # Every joint inherits {node, connectedBody, collideConnected}
+            # (public @serializable — no underscore). Subclass-specific
+            # fields (_motorSpeed, _maxLength, etc.) use the private
+            # underscore-prefixed names. _joint_base emits the shared
+            # skeleton; each branch layers its own tunables. See
+            # physics.py for the serialization convention note.
             elif action == "add_distance_joint2d":
+                # Note: serialized distance field is ``_maxLength``
+                # (not ``_distance``) in Cocos 3.8.
                 nid = op["node_id"]
                 obj = _joint_base(nid, "cc.DistanceJoint2D", "dj2", op)
                 obj.update({
-                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
-                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
-                                              op.get("connected_anchor_y", 0)),
-                    "_distance": op.get("distance", 1.0),
+                    "anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                             op.get("connected_anchor_y", 0)),
+                    "_maxLength": op.get("distance", 1.0),
                     "_autoCalcDistance": op.get("auto_calc_distance", True),
                     "_frequency": op.get("frequency", 0.0),
                     "_dampingRatio": op.get("damping_ratio", 0.0),
@@ -432,9 +446,9 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 nid = op["node_id"]
                 obj = _joint_base(nid, "cc.HingeJoint2D", "hj2", op)
                 obj.update({
-                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
-                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
-                                              op.get("connected_anchor_y", 0)),
+                    "anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                             op.get("connected_anchor_y", 0)),
                     "_enableMotor": op.get("enable_motor", False),
                     "_motorSpeed": op.get("motor_speed", 0.0),
                     "_maxMotorTorque": op.get("max_motor_torque", 1000.0),
@@ -449,9 +463,9 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 nid = op["node_id"]
                 obj = _joint_base(nid, "cc.SpringJoint2D", "sj2", op)
                 obj.update({
-                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
-                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
-                                              op.get("connected_anchor_y", 0)),
+                    "anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                             op.get("connected_anchor_y", 0)),
                     "_distance": op.get("distance", 1.0),
                     "_autoCalcDistance": op.get("auto_calc_distance", True),
                     "_frequency": op.get("frequency", 5.0),
@@ -461,7 +475,9 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 results.append(cid)
 
             elif action == "add_mouse_joint2d":
-                # MouseJoint doesn't use connectedBody/collideConnected.
+                # MouseJoint doesn't use the base connectedBody /
+                # collideConnected machinery. _target is a runtime-only
+                # field but we emit it for consumer inspection.
                 nid = op["node_id"]
                 obj = _make_generic(nid, "cc.MouseJoint2D", "mj2", {
                     "_maxForce": op.get("max_force", 1000.0),
@@ -476,9 +492,9 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 nid = op["node_id"]
                 obj = _joint_base(nid, "cc.SliderJoint2D", "sl2", op)
                 obj.update({
-                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
-                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
-                                              op.get("connected_anchor_y", 0)),
+                    "anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                             op.get("connected_anchor_y", 0)),
                     "_angle": op.get("angle", 0.0),
                     "_enableMotor": op.get("enable_motor", False),
                     "_motorSpeed": op.get("motor_speed", 0.0),
@@ -494,9 +510,9 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 nid = op["node_id"]
                 obj = _joint_base(nid, "cc.WheelJoint2D", "wj2", op)
                 obj.update({
-                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
-                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
-                                              op.get("connected_anchor_y", 0)),
+                    "anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                             op.get("connected_anchor_y", 0)),
                     "_angle": op.get("angle", 90.0),
                     "_enableMotor": op.get("enable_motor", False),
                     "_motorSpeed": op.get("motor_speed", 0.0),
@@ -508,13 +524,14 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 results.append(cid)
 
             elif action == "add_fixed_joint_2d":
+                # FixedJoint2D in 3.8 has no ``_angle`` field —
+                # removed; the old ``angle=`` param was silently ignored.
                 nid = op["node_id"]
                 obj = _joint_base(nid, "cc.FixedJoint2D", "fj2", op)
                 obj.update({
-                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
-                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
-                                              op.get("connected_anchor_y", 0)),
-                    "_angle": op.get("angle", 0.0),
+                    "anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                             op.get("connected_anchor_y", 0)),
                     "_frequency": op.get("frequency", 5.0),
                     "_dampingRatio": op.get("damping_ratio", 0.7),
                 })
@@ -569,10 +586,9 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
 def _joint_base(nid: int, type_name: str, prefix: str, op: dict) -> dict:
     """Shared skeleton for ``cc.*Joint2D`` ops inside ``batch_ops``.
 
-    Builds the common {node, _connectedBody, _collideConnected, _id}
-    section so each joint branch deals only with its own knobs. Kept at
-    module scope (not inside ``batch_ops``) for performance — no closure
-    rebuild per call.
+    Joint2D's base @serializable fields are PUBLIC — no underscore
+    prefix on ``connectedBody`` / ``collideConnected``. See the
+    joint-2d.ts source and the note in physics.py.
     """
     obj: dict = {
         "__type__": type_name,
@@ -582,8 +598,8 @@ def _joint_base(nid: int, type_name: str, prefix: str, op: dict) -> dict:
         "_enabled": True,
         "__prefab": None,
         "_id": _nid(prefix),
-        "_collideConnected": op.get("collide_connected", False),
+        "collideConnected": op.get("collide_connected", False),
     }
     cb = op.get("connected_body_id")
-    obj["_connectedBody"] = _ref(cb) if cb is not None else None
+    obj["connectedBody"] = _ref(cb) if cb is not None else None
     return obj

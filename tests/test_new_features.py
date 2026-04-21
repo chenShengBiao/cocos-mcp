@@ -161,13 +161,23 @@ def test_two_body_joints(adder, type_name):
     cid = adder(str(path), n1, connected_body_id=rb2)
     obj = sb.get_object(path, cid)
     assert obj["__type__"] == type_name
-    assert obj["_connectedBody"] == {"__id__": rb2}
+    # Joint2D base uses PUBLIC @serializable fields — JSON key is
+    # ``connectedBody`` (no underscore). Pre-audit we wrote
+    # ``_connectedBody`` which the engine silently ignored, so every
+    # two-body joint ran as a world-anchored joint at runtime.
+    assert obj["connectedBody"] == {"__id__": rb2}
+    assert "_connectedBody" not in obj
     # Validate scene structure intact
     assert sb.validate_scene(path)["valid"]
 
 
 def test_mouse_joint2d_has_no_connected_body():
-    """MouseJoint2D differs from the others — no connected body, just a target."""
+    """MouseJoint2D differs from the others — no connected body, just a target.
+
+    The ``_target`` field isn't ``@serializable`` in engine 3.8 either,
+    but we still emit it for agent inspection; the runtime reads it
+    from pointer input, not the scene file.
+    """
     path, info = _scene()
     n1 = sb.add_node(path, info["canvas_node_id"], "DraggableBody")
     sb.add_uitransform(path, n1, 50, 50)
@@ -177,7 +187,10 @@ def test_mouse_joint2d_has_no_connected_body():
     assert obj["__type__"] == "cc.MouseJoint2D"
     assert obj["_maxForce"] == 500.0
     assert obj["_target"] == {"__type__": "cc.Vec2", "x": 100, "y": 50}
-    assert "_connectedBody" not in obj  # MouseJoint doesn't have one
+    # MouseJoint inherits connectedBody/collideConnected but the engine
+    # runtime ignores them — direct builder omits both fields entirely.
+    assert "connectedBody" not in obj
+    assert "_connectedBody" not in obj
 
 
 def test_hinge_joint_motor_and_limit_fields():

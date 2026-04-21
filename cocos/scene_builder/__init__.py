@@ -563,9 +563,29 @@ def list_nodes(scene_path: str | Path) -> list[dict]:
 # ----------- validation -----------
 
 def validate_scene(scene_path: str | Path) -> ValidationResult:
-    """Sanity-check a scene file: ref ranges, type tags, parent linkage,
-    Canvas-Camera binding, and UI node ancestry."""
+    """Sanity-check a scene or prefab file.
+
+    Shared checks (scenes AND prefabs):
+
+    * ``__id__`` ref ranges + ``__type__`` presence on referenced objects.
+    * Bare ``int`` values on fields that should be ``{__id__: N}`` refs
+      (Button.target, Canvas._cameraComponent, etc.).
+
+    Scene-only checks (.scene files):
+
+    * ``cc.Canvas._cameraComponent`` must point to a valid ``cc.Camera``.
+    * Every ``cc.UITransform`` node must resolve under a ``cc.Canvas``
+      ancestor — unparented UI nodes crash on touch input.
+
+    Prefab files (``.prefab`` suffix) skip the Canvas/UITransform-
+    ancestry checks: a prefab's root has ``_parent: None`` by design,
+    so the ancestor walk never reaches a Canvas even when the prefab
+    is perfectly valid for instantiation. The dogfood report called
+    this out as a MEDIUM — the old behavior flagged every prefab with
+    a UI node as "malformed", drowning real issues in false positives.
+    """
     s = _load_scene(scene_path)
+    is_prefab = str(scene_path).endswith(".prefab")
     issues = []
     n = len(s)
 
@@ -594,55 +614,97 @@ def validate_scene(scene_path: str | Path) -> ValidationResult:
             issues.append(f"[{i}]: missing __type__")
         walk_refs(o, f"[{i}]")
 
-    # --- 2. Canvas must have a valid Camera ref ---
-    for i, o in enumerate(s):
-        if not isinstance(o, dict):
-            continue
-        if o.get("__type__") == "cc.Canvas":
-            cam_ref = o.get("_cameraComponent")
-            if cam_ref is None or not isinstance(cam_ref, dict):
-                issues.append(f"[{i}] cc.Canvas: _cameraComponent is null (will crash on touch)")
-            elif "__id__" in cam_ref:
-                cid = cam_ref["__id__"]
-                if cid < 0 or cid >= n:
-                    issues.append(f"[{i}] cc.Canvas: _cameraComponent __id__ {cid} out of range")
-                elif s[cid].get("__type__") != "cc.Camera":
-                    issues.append(f"[{i}] cc.Canvas: _cameraComponent points to {s[cid].get('__type__')} not cc.Camera")
+    # Canvas + Canvas-ancestry checks are scene-only — a .prefab's
+    # root node is intentionally parent-less, so the ancestor walk
+    # would always fail and the report would be noise.
+    if not is_prefab:
+        # --- 2. Canvas must have a valid Camera ref ---
+        for i, o in enumerate(s):
+            if not isinstance(o, dict):
+                continue
+            if o.get("__type__") == "cc.Canvas":
+                cam_ref = o.get("_cameraComponent")
+                if cam_ref is None or not isinstance(cam_ref, dict):
+                    issues.append(f"[{i}] cc.Canvas: _cameraComponent is null (will crash on touch)")
+                elif "__id__" in cam_ref:
+                    cid = cam_ref["__id__"]
+                    if cid < 0 or cid >= n:
+                        issues.append(f"[{i}] cc.Canvas: _cameraComponent __id__ {cid} out of range")
+                    elif s[cid].get("__type__") != "cc.Camera":
+                        issues.append(f"[{i}] cc.Canvas: _cameraComponent points to {s[cid].get('__type__')} not cc.Camera")
 
-    # --- 3. UI nodes (with UITransform) should be under a Canvas ---
-    canvas_node_ids = set()
-    for o in s:
-        if isinstance(o, dict) and o.get("__type__") == "cc.Canvas":
+        # --- 3. UI nodes (with UITransform) should be under a Canvas ---
+        canvas_node_ids = set()
+        for o in s:
+            if isinstance(o, dict) and o.get("__type__") == "cc.Canvas":
+                node_ref = o.get("node")
+                if node_ref and "__id__" in node_ref:
+                    canvas_node_ids.add(node_ref["__id__"])
+
+        def _is_under_canvas(node_id: int, visited: set | None = None) -> bool:
+            if visited is None:
+                visited = set()
+            if node_id in visited:
+                return False
+            visited.add(node_id)
+            if node_id in canvas_node_ids:
+                return True
+            node = s[node_id] if 0 <= node_id < n else None
+            if not node or not isinstance(node, dict):
+                return False
+            parent_ref = node.get("_parent")
+            if parent_ref and isinstance(parent_ref, dict) and "__id__" in parent_ref:
+                return _is_under_canvas(parent_ref["__id__"], visited)
+            return False
+
+        for i, o in enumerate(s):
+            if not isinstance(o, dict) or o.get("__type__") != "cc.UITransform":
+                continue
             node_ref = o.get("node")
-            if node_ref and "__id__" in node_ref:
-                canvas_node_ids.add(node_ref["__id__"])
+            if not node_ref or "__id__" not in node_ref:
+                continue
+            node_id = node_ref["__id__"]
+            if not _is_under_canvas(node_id):
+                node_name = s[node_id].get("_name", "?") if 0 <= node_id < n else "?"
+                issues.append(f"[{i}] UITransform on node '{node_name}'(#{node_id}) is NOT under any Canvas (will crash on touch)")
 
-    def _is_under_canvas(node_id: int, visited: set | None = None) -> bool:
-        if visited is None:
-            visited = set()
-        if node_id in visited:
-            return False
-        visited.add(node_id)
-        if node_id in canvas_node_ids:
-            return True
-        node = s[node_id] if 0 <= node_id < n else None
-        if not node or not isinstance(node, dict):
-            return False
-        parent_ref = node.get("_parent")
-        if parent_ref and isinstance(parent_ref, dict) and "__id__" in parent_ref:
-            return _is_under_canvas(parent_ref["__id__"], visited)
-        return False
-
-    for i, o in enumerate(s):
-        if not isinstance(o, dict) or o.get("__type__") != "cc.UITransform":
-            continue
-        node_ref = o.get("node")
-        if not node_ref or "__id__" not in node_ref:
-            continue
-        node_id = node_ref["__id__"]
-        if not _is_under_canvas(node_id):
-            node_name = s[node_id].get("_name", "?") if 0 <= node_id < n else "?"
-            issues.append(f"[{i}] UITransform on node '{node_name}'(#{node_id}) is NOT under any Canvas (will crash on touch)")
+    # --- prefab-only: every cc.Node must have a valid PrefabInfo ---
+    if is_prefab:
+        seen_fileids: dict[str, int] = {}
+        for i, o in enumerate(s):
+            if not isinstance(o, dict) or o.get("__type__") != "cc.Node":
+                continue
+            pref = o.get("_prefab")
+            if pref is None:
+                issues.append(
+                    f"[{i}] cc.Node '{o.get('_name', '?')}' in .prefab has "
+                    f"_prefab: null — Cocos needs a cc.PrefabInfo per node"
+                )
+                continue
+            if not isinstance(pref, dict) or "__id__" not in pref:
+                issues.append(f"[{i}] cc.Node._prefab is not a {{__id__: N}} ref")
+                continue
+            pi_idx = pref["__id__"]
+            if pi_idx < 0 or pi_idx >= n:
+                continue  # already flagged by the ref-range pass
+            target = s[pi_idx]
+            if not isinstance(target, dict) or target.get("__type__") != "cc.PrefabInfo":
+                issues.append(
+                    f"[{i}] cc.Node._prefab → [{pi_idx}] "
+                    f"({target.get('__type__') if isinstance(target, dict) else '?'}), "
+                    "expected cc.PrefabInfo"
+                )
+                continue
+            fid = target.get("fileId")
+            if not fid:
+                issues.append(f"[{pi_idx}] cc.PrefabInfo missing fileId")
+            elif fid in seen_fileids:
+                issues.append(
+                    f"[{pi_idx}] cc.PrefabInfo.fileId {fid!r} duplicates "
+                    f"[{seen_fileids[fid]}] — instance-identity collision"
+                )
+            else:
+                seen_fileids[fid] = pi_idx
 
     # --- 4. Check for bare int values in component ref fields ---
     ref_field_map = {

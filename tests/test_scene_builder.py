@@ -161,9 +161,15 @@ class TestComponents:
         cid = add_rigidbody2d(path, n, body_type=2, gravity_scale=0.5)
         with open(path) as f:
             data = json.load(f)
-        assert data[cid]["__type__"] == "cc.RigidBody2D"
-        assert data[cid]["type"] == 2
-        assert data[cid]["gravityScale"] == 0.5
+        rb = data[cid]
+        assert rb["__type__"] == "cc.RigidBody2D"
+        # Cocos 3.8 serializes getter/setter-backed fields with their
+        # underscore-prefixed private names. Prior to the physics audit
+        # we wrote "type"/"gravityScale" which the engine silently
+        # ignored → every body ran as Dynamic with default gravity.
+        assert rb["_type"] == 2
+        assert rb["_gravityScale"] == 0.5
+        assert rb["_linearVelocity"] == {"__type__": "cc.Vec2", "x": 0, "y": 0}
 
     def test_add_box_collider(self):
         path, info = _tmp_scene()
@@ -257,7 +263,15 @@ class TestBatchOps:
             data = json.load(f)
         col = data[col_id]
         assert col["__type__"] == "cc.PolygonCollider2D"
-        assert col["_points"] == [[-50, -50], [50, -50], [50, 50], [-50, 50]]
+        # Each vertex must be a cc.Vec2 dict — engine types the field as
+        # Vec2[], so raw [x, y] arrays deserialize to zero-filled Vec2
+        # and the polygon silently becomes a degenerate shape.
+        assert col["_points"] == [
+            {"__type__": "cc.Vec2", "x": -50, "y": -50},
+            {"__type__": "cc.Vec2", "x": 50, "y": -50},
+            {"__type__": "cc.Vec2", "x": 50, "y": 50},
+            {"__type__": "cc.Vec2", "x": -50, "y": 50},
+        ]
 
     def test_polygon_collider2d_explicit_points(self):
         """Triangle polygon with explicit vertex list."""
@@ -273,7 +287,9 @@ class TestBatchOps:
         with open(path) as f:
             data = json.load(f)
         col = data[col_id]
-        assert col["_points"] == tri
+        assert col["_points"] == [
+            {"__type__": "cc.Vec2", "x": x, "y": y} for x, y in tri
+        ]
         assert col["_friction"] == 0.8
         assert col["_density"] == 2.5
         assert col["_sensor"] is True
@@ -322,16 +338,27 @@ class TestBatchOps:
         ]
         assert [data[cid]["__type__"] for cid in joint_cids] == expected
         # DistanceJoint2D specifically passes through configuration.
+        # Note: serialized field is ``_maxLength`` in Cocos 3.8 (not
+        # ``_distance``); the python parameter name kept stable.
         dj = data[joint_cids[0]]
-        assert dj["_distance"] == 150.0
+        assert dj["_maxLength"] == 150.0
         assert dj["_autoCalcDistance"] is False
         # HingeJoint2D motor enabled.
         hj = data[joint_cids[1]]
         assert hj["_enableMotor"] is True
         assert hj["_motorSpeed"] == 45.0
+        # Base-class fields are PUBLIC @serializable — no underscore.
+        assert "anchor" in dj and "connectedAnchor" in dj
+        assert "connectedBody" in dj and "collideConnected" in dj
+        assert "_anchor" not in dj, "legacy underscore form resurrected"
+        assert "_connectedBody" not in dj
 
     def test_joint_without_connected_body(self):
-        """connected_body_id is optional — None means anchor to world."""
+        """connected_body_id is optional — None means anchor to world.
+
+        Also regression-guards the field name: pre-audit we wrote
+        ``_connectedBody`` (underscore) which the 3.8 engine ignores.
+        """
         path, info = _tmp_scene()
         result = batch_ops(path, [
             {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "Solo"},
@@ -341,7 +368,9 @@ class TestBatchOps:
         cid = result["results"][2]
         with open(path) as f:
             data = json.load(f)
-        assert data[cid]["_connectedBody"] is None
+        # Public @serializable — JSON key is ``connectedBody``.
+        assert data[cid]["connectedBody"] is None
+        assert "_connectedBody" not in data[cid]
 
     # ------- named back-references + named_results -------
 
@@ -435,6 +464,207 @@ class TestValidation:
         v = validate_scene(path)
         assert not v["valid"]
         assert any("9999" in issue for issue in v["issues"])
+
+    def test_prefab_skips_canvas_ancestor_check(self, tmp_path):
+        """Dogfood-flappy MEDIUM #6: validate_scene used to flag every
+        UITransform in a .prefab as "not under a Canvas" because the
+        prefab's root has ``_parent: null`` by design. Prefab files
+        now skip the Canvas-ancestry walk entirely."""
+        from cocos.scene_builder import (
+            create_prefab, add_node, add_uitransform, add_sprite,
+        )
+        prefab = str(tmp_path / "Enemy.prefab")
+        info = create_prefab(prefab, root_name="Enemy")
+        # A realistic subtree with UITransform/Sprite — would trip the
+        # Canvas check in the old validator.
+        add_uitransform(prefab, info["root_node_id"], 80, 80)
+        add_sprite(prefab, info["root_node_id"], color=(200, 50, 50, 255))
+        child = add_node(prefab, info["root_node_id"], "Body")
+        add_uitransform(prefab, child, 40, 40)
+
+        v = validate_scene(prefab)
+        assert v["valid"], f"prefab should validate clean; got: {v['issues']}"
+        # And it should NOT report any "not under any Canvas" noise.
+        assert not any("Canvas" in issue for issue in v["issues"])
+
+    def test_prefab_flags_missing_prefab_info(self, tmp_path):
+        """A .prefab whose node is missing its cc.PrefabInfo (hand-
+        tampered, or produced by an old cocos-mcp pre-Bug-B) must be
+        caught — leaving it silent is what allowed Bug B to land in the
+        first place."""
+        from cocos.scene_builder import create_prefab
+        prefab = str(tmp_path / "Broken.prefab")
+        info = create_prefab(prefab, root_name="Broken")
+        # Manually break: clear the root's _prefab ref (simulates a
+        # pre-fix cocos-mcp scene that forgot to append PrefabInfo).
+        with open(prefab) as f:
+            data = json.load(f)
+        data[info["root_node_id"]]["_prefab"] = None
+        with open(prefab, "w") as f:
+            json.dump(data, f)
+
+        v = validate_scene(prefab)
+        assert not v["valid"]
+        assert any("_prefab: null" in issue for issue in v["issues"])
+
+    def test_prefab_flags_duplicate_file_ids(self, tmp_path):
+        """Two nodes sharing a PrefabInfo.fileId would collide on
+        instance-identity at runtime. validate_scene catches it."""
+        from cocos.scene_builder import create_prefab, add_node
+        prefab = str(tmp_path / "Dup.prefab")
+        info = create_prefab(prefab, root_name="Dup")
+        child = add_node(prefab, info["root_node_id"], "Child")
+
+        # Force the child's PrefabInfo.fileId to match the root's.
+        with open(prefab) as f:
+            data = json.load(f)
+        root_pi = data[info["root_node_id"]]["_prefab"]["__id__"]
+        child_pi = data[child]["_prefab"]["__id__"]
+        data[child_pi]["fileId"] = data[root_pi]["fileId"]
+        with open(prefab, "w") as f:
+            json.dump(data, f)
+
+        v = validate_scene(prefab)
+        assert not v["valid"]
+        assert any("duplicates" in issue for issue in v["issues"])
+
+
+# ========================================================================
+# Physics serialization shape lock-in.
+# Cocos 3.8's deserializer silently drops unknown field names and
+# wrong-shape values — the physics audit found every RigidBody2D /
+# collider / joint config was being ignored before the fix landed.
+# These tests are regression guards.
+# ========================================================================
+
+
+class TestPhysicsSerializationShape:
+    def test_rigidbody2d_uses_underscore_backing_fields(self):
+        """RigidBody2D's getter/setter-backed fields serialize with
+        their underscore-prefixed private names (``_type``,
+        ``_gravityScale``, ...). Public @serializable fields
+        (``enabledContactListener``, ``bullet``, ``awakeOnLoad``) stay
+        bare. Any drift silently ignores the caller's config."""
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "N")
+        cid = add_rigidbody2d(path, n, body_type=0, gravity_scale=0.5,
+                              fixed_rotation=True, linear_damping=0.3,
+                              angular_damping=0.2, bullet=True,
+                              awake_on_load=False)
+        with open(path) as f:
+            rb = json.load(f)[cid]
+        # Serialized with underscore — private backing field names.
+        assert rb["_type"] == 0
+        assert rb["_gravityScale"] == 0.5
+        assert rb["_fixedRotation"] is True
+        assert rb["_linearDamping"] == 0.3
+        assert rb["_angularDamping"] == 0.2
+        assert rb["_allowSleep"] is True
+        assert rb["_angularVelocity"] == 0.0
+        assert rb["_group"] == 1  # PhysicsGroup.DEFAULT
+        assert rb["_linearVelocity"] == {"__type__": "cc.Vec2", "x": 0, "y": 0}
+        # Public @serializable — bare name.
+        assert rb["enabledContactListener"] is True
+        assert rb["bullet"] is True
+        assert rb["awakeOnLoad"] is False
+        # None of the legacy wrong names should be present.
+        for bad in ("type", "gravityScale", "fixedRotation", "linearDamping",
+                    "angularDamping", "linearVelocity", "angularVelocity",
+                    "allowSleep"):
+            assert bad not in rb, f"legacy field {bad!r} resurrected"
+
+    def test_box_collider2d_uses_cc_size_and_cc_vec2_dicts(self):
+        """BoxCollider2D.``_size`` must be a ``cc.Size`` dict;
+        ``_offset`` must be ``cc.Vec2``. A bare list deserializes to
+        a zero/default Size/Vec2 and the collider silently becomes a
+        unit square at the origin."""
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "B")
+        cid = add_box_collider2d(path, n, width=80, height=40,
+                                 offset_x=10, offset_y=-5)
+        with open(path) as f:
+            col = json.load(f)[cid]
+        assert col["_size"] == {"__type__": "cc.Size", "width": 80, "height": 40}
+        assert col["_offset"] == {"__type__": "cc.Vec2", "x": 10, "y": -5}
+
+    def test_circle_collider2d_offset_is_cc_vec2_dict(self):
+        """Same drift guard for CircleCollider2D."""
+        from cocos.scene_builder import add_circle_collider2d
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "C")
+        cid = add_circle_collider2d(path, n, radius=30, offset_x=5)
+        with open(path) as f:
+            col = json.load(f)[cid]
+        assert col["_radius"] == 30
+        assert col["_offset"] == {"__type__": "cc.Vec2", "x": 5, "y": 0}
+
+    def test_polygon_collider2d_points_are_cc_vec2_dicts(self):
+        """``_points`` is typed ``Vec2[]`` in the engine — every entry
+        must be a cc.Vec2 dict, not a bare [x, y] list."""
+        from cocos.scene_builder import add_polygon_collider2d
+        path, info = _tmp_scene()
+        n = add_node(path, info["canvas_node_id"], "P")
+        cid = add_polygon_collider2d(path, n, points=[[0, 10], [-10, -10], [10, -10]])
+        with open(path) as f:
+            col = json.load(f)[cid]
+        assert col["_points"] == [
+            {"__type__": "cc.Vec2", "x": 0, "y": 10},
+            {"__type__": "cc.Vec2", "x": -10, "y": -10},
+            {"__type__": "cc.Vec2", "x": 10, "y": -10},
+        ]
+
+    def test_joint2d_base_fields_have_no_underscore(self):
+        """Joint2D's @serializable base fields (anchor / connectedAnchor
+        / connectedBody / collideConnected) are PUBLIC — no underscore
+        prefix. Verified across every joint variant."""
+        from cocos.scene_builder import (
+            add_distance_joint2d, add_hinge_joint2d, add_spring_joint2d,
+            add_slider_joint2d, add_wheel_joint2d, add_fixed_joint_2d,
+            add_relative_joint2d,
+        )
+        path, info = _tmp_scene()
+        n1 = add_node(path, info["canvas_node_id"], "A")
+        add_rigidbody2d(path, n1)
+        n2 = add_node(path, info["canvas_node_id"], "B")
+        rb2 = add_rigidbody2d(path, n2)
+
+        # RelativeJoint2D's base keys are connectedBody/collideConnected
+        # only — it doesn't use anchor/connectedAnchor (uses _linearOffset
+        # instead), but the base-field rule still applies.
+        joints = [
+            add_distance_joint2d(path, n1, connected_body_id=rb2),
+            add_hinge_joint2d(path, n1, connected_body_id=rb2),
+            add_spring_joint2d(path, n1, connected_body_id=rb2),
+            add_slider_joint2d(path, n1, connected_body_id=rb2),
+            add_wheel_joint2d(path, n1, connected_body_id=rb2),
+            add_fixed_joint_2d(path, n1, connected_body_id=rb2),
+            add_relative_joint2d(path, n1, connected_body_id=rb2),
+        ]
+        with open(path) as f:
+            data = json.load(f)
+        for cid in joints:
+            j = data[cid]
+            ttype = j["__type__"]
+            assert "connectedBody" in j, f"{ttype} missing connectedBody"
+            assert "_connectedBody" not in j, f"{ttype} has legacy _connectedBody"
+            assert "collideConnected" in j
+            assert "_collideConnected" not in j
+
+    def test_distance_joint2d_uses_maxLength_field(self):
+        """DistanceJoint2D's distance field is ``_maxLength`` in Cocos
+        3.8, not ``_distance``. Pre-fix we wrote ``_distance`` which
+        the engine ignored and the joint ran with maxLength=5 (default).
+        """
+        from cocos.scene_builder import add_distance_joint2d
+        path, info = _tmp_scene()
+        n1 = add_node(path, info["canvas_node_id"], "A")
+        add_rigidbody2d(path, n1)
+        cid = add_distance_joint2d(path, n1, distance=123.4, auto_calc_distance=False)
+        with open(path) as f:
+            j = json.load(f)[cid]
+        assert j["_maxLength"] == 123.4
+        assert "_distance" not in j
+        assert j["_autoCalcDistance"] is False
 
 
 class TestNewComponents:
