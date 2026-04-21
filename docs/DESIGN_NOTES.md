@@ -1,1021 +1,314 @@
-# Design Notes
+# 设计决策笔记
 
-> **This file used to be `CHANGELOG.md`.** Moved here in v1.2-dev: release
-> notes live in [Gitee Releases](https://gitee.com/csbcsb/cocos-mcp/releases)
-> going forward. What stays here is the **engineering rationale** — dogfood
-> findings, Cocos 3.8 field-drift fixes, Bug A/B regression context,
-> architecture decisions — things that don't fit in release notes or `git log`
-> one-liners but are worth preserving when future-you asks "why is this field
-> `1` not `0`?".
+[🇺🇸 English](./DESIGN_NOTES.en.md)
+
+> 这份文档是 cocos-mcp 的**工程日志** —— 沉淀设计决策的"为什么"。
 >
-> No longer actively maintained in the "Unreleased" sense. Entries below
-> dated before the split are preserved verbatim.
+> Release notes（每个版本做了什么）移到 [Gitee Releases](https://gitee.com/csbcsb/cocos-mcp/releases)。
+> 这里只留：**dogfood 反馈、Cocos 3.8 字段漂移对齐、Bug A/B 回归、架构取舍** —— 这些东西不适合塞进一行 git log，但将来有人问"为什么这个字段是 1 不是 0"时要能追溯。
+>
+> **中文版**是主线，按**主题**组织，面向维护者。
+> **英文版**（[DESIGN_NOTES.en.md](./DESIGN_NOTES.en.md)）是**按 release 平铺**的历史详细记录，v1.2 起不再主动维护，作为冻结的历史参考。
 
 ---
 
-Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
-
-Total: **184 tools** (was 80) · **741 tests** (was 45) · **0 mypy / ruff errors**.
-
-### Fixed — batch_ops param parity with direct sb.* API (dogfood v2 follow-up)
-
-End-to-end dogfood of Flappy Bird (Cocos Creator 3.8.6 headless
-build + Chromium runtime) confirmed every physics / UI / atlas /
-prefab fix — but uncovered one lingering friction: ``batch_ops``'s
-``add_node`` / ``set_position`` / ``set_scale`` took different
-parameter names than the direct ``sb.add_node`` / ``set_node_*``
-functions. Agents familiar with the direct API handed over
-``lpos=(x, y, z)`` / ``lscale=(sx, sy, sz)`` tuples and silently got
-(0, 0, 0) positioning + (1, 1, 1) scale regardless of op input.
-
-Worse: the batch ``add_node`` never read ``lscale`` at all (neither
-tuple nor scalars), so **every batch-created node came out at the
-engine default scale** — a latent bug unrelated to the naming
-mismatch. Before this fix, there was no way to set initial scale via
-``batch_ops``; only ``set_scale`` as a separate op worked.
-
-Fix: three small helpers (``_resolve_lpos`` / ``_resolve_lscale`` /
-``_resolve_xyz``) accept EITHER form. Tuple wins when both present;
-``lpos=[x, y]`` (2D shorthand) defaults z to 0. The legacy scalar
-form still works identically — no breaking changes for callers that
-were already using the batch shape. Applies to:
-
-* ``add_node`` — ``lpos=[x,y,z]`` / ``lscale=[sx,sy,sz]`` tuples +
-  new ``lscale`` scalar support (sx/sy/sz were previously dropped
-  silently).
-* ``set_position`` — ``lpos=[x,y,z]`` in addition to ``x/y/z``.
-* ``set_scale`` — ``lscale=[sx,sy,sz]`` in addition to ``sx/sy/sz``.
-
-**Tests — 734 → 741 (+7)**
-
-* ``test_add_node_accepts_lpos_tuple_matching_direct_api``
-* ``test_add_node_accepts_lscale_tuple`` (catches the silent-drop bug)
-* ``test_add_node_legacy_scalars_still_work`` (backward-compat)
-* ``test_add_node_lpos_tuple_wins_over_scalars`` (deterministic precedence)
-* ``test_add_node_lpos_short_tuple_defaults_z_to_zero`` (2D shorthand)
-* ``test_set_position_accepts_lpos_tuple``
-* ``test_set_scale_accepts_lscale_tuple``
-
-### Fixed — AutoAtlas .pac shape + added runtime DynamicAtlas helper (183 → 184 tools)
-
-`cocos_create_sprite_atlas` produced files that Cocos 3.8's
-auto-atlas importer silently rejected, so the build emitted a
-`SpriteAtlas` marker but no packed texture. The scene still
-referenced the raw PNGs individually — heavy UI screens saw
-no draw-call reduction. Found during a post-fix sweep of
-Cocos 3.8 asset serialization. All bugs now regression-guarded.
-
-**Real bugs fixed:**
-
-* `.pac` body had packing config (maxWidth / padding / algorithm / …)
-  in-line; in 3.8 the body is a single-line marker
-  `{"__type__": "cc.SpriteAtlas"}` and **all config lives in
-  `.pac.meta` `userData`**. Extra body fields don't break parsing
-  but don't take effect — they were silently discarded.
-* Meta used `"ver": "1.0.7"` — 3.8 expects `"1.0.8"`, and the
-  importer's version gate silently rejects anything else.
-* Meta `userData` was empty (`{}`). 3.8 expects 17 keys including
-  `removeTextureInBundle`, `removeImageInBundle`,
-  `removeSpriteAtlasInBundle`, `compressSettings`, `textureSetting`
-  (nested: `wrapModeS` / `minfilter` / etc.) — without these the
-  importer falls back to "do nothing" defaults.
-* Algorithm string was `"MaxRect"`; correct 3.8 name is
-  `"MaxRects"` (plural). Mis-named algorithm → importer ignores.
-* Defaults were wrong: `maxWidth`/`maxHeight` 2048 (3.8 default
-  1024), `powerOfTwo` true (3.8 default false), `filterUnused`
-  false (3.8 default true).
-* `png_paths` was required, which contradicts AutoAtlas's core
-  "scan-folder-on-build" mechanic. Now optional; callers can drop
-  PNGs into `atlas_dir_rel` (returned in response) at any time
-  and the build picks them up.
-
-**`cocos_enable_dynamic_atlas`** (new, runtime packing):
-
-  Cocos 3.8 ships a separate runtime batching system
-  (`dynamicAtlasManager.enabled = true`) that blits small sprite
-  frames into shared GPU textures at draw time. Turning it on
-  typically saves 3-10× draw calls on heavy UI screens — frames
-  too new or too dynamic for AutoAtlas still benefit. The flag is
-  a one-liner in a boot script; this tool generates the script +
-  hands back both UUIDs so the caller can immediately attach::
-
-    r = cocos_enable_dynamic_atlas(project, max_frame_size=512)
-    cocos_add_script(scene, gm_node, r["uuid_compressed"])
-
-  Script is idempotent on re-generation (Bug A fix applies here
-  too — preserves UUID on rewrite, so already-attached components
-  keep resolving).
-
-**Tests — 728 → 734 (+6)**
-
-* `test_create_sprite_atlas_without_png_paths_still_valid` —
-  creating an empty atlas folder must produce a valid importable
-  `.pac` + meta pair; further PNGs dropped in later are picked up
-  by build automatically.
-* `test_create_sprite_atlas_meta_has_complete_userData` — lock-in
-  on `ver: 1.0.8` + all 17 required userData fields + nested
-  `textureSetting`. Regression guard.
-* `test_create_sprite_atlas_tunables_override_defaults` — caller
-  kwargs (max_width, padding, algorithm, quality, …) reach the
-  `userData` block.
-* `test_enable_dynamic_atlas_writes_script_with_flag` — generated
-  `.ts` actually contains `dynamicAtlasManager.enabled = true`.
-* `test_enable_dynamic_atlas_custom_max_frame_size` — `maxFrameSize`
-  constant lands in the source.
-* `test_enable_dynamic_atlas_preserves_uuid_on_rewrite` — idempotent
-  UUID on regenerate (Bug A guarantee).
-
-### Added — Batch-op extensions + 2 composites + introspection (180 → 183 tools)
-
-Second pass on dogfood recommendations, focused on the "still 3-6 calls
-per composite action" complaint agents had even post-Bug-A/B. Details:
-
-- **`cocos_batch_scene_ops` gains 9 new op kinds**:
-  - ``add_polygon_collider2d`` — vertex-list collider for non-rect shapes.
-  - All eight ``cc.*Joint2D`` variants (distance / hinge / spring / mouse
-    / slider / wheel / fixed / relative). Dogfood's 10-individual-call
-    rigidbody-collider-joint trio now folds into one batch. Every joint
-    supports the full param surface the direct tools accept.
-  - ``attach_script`` inside batch auto-compresses 36-char standard UUIDs
-    to match the direct ``scene_builder.add_script`` behavior — closes
-    a silent-no-op trap (previously a standard UUID as ``__type__``
-    produced an unresolved component).
-- **Name-addressable batch results**: an op can set ``"name": "bird"``
-  and later ops reference it as ``"$bird"`` instead of ``"$0"``.
-  Resolution is name-first in a ``named_results: dict`` on the
-  response; positional ``$N`` still works unchanged. Unknown ``$name``
-  falls through as a literal so the downstream op errors clearly
-  rather than silently substituting the wrong id.
-- **``cocos_add_physics_body2d``** (composite): RigidBody2D + a shape
-  collider (box / circle / polygon) in one call. Returns
-  ``{rigidbody_id, collider_id, shape}``. Every Bird / Pipe / Ground
-  / Enemy in the dogfood ran this 2-call sequence — now it's one.
-  Unknown ``shape`` raises rather than silently defaulting.
-- **``cocos_add_button_with_label``** (composite): creates the canonical
-  ``Btn (Node + UITransform + optional Sprite + Button) → Label (Node
-  + UITransform + Label)`` subtree in one call. Every menu button in
-  the dogfood ran 7 separate calls for this; now it's one. Accepts
-  design-token presets, optional sprite-frame background, and
-  ``click_events`` forwarded to ``add_button`` verbatim.
-- **``cocos_list_tools``** (introspection): returns the actual tool
-  surface the server registered. Solves the "stale MCP catalog"
-  issue the dogfood run hit (Bug C in the report) — subagents'
-  deferred-tool search occasionally couldn't see tools added after
-  their session started. Supports ``name_contains`` substring and
-  ``category`` bucket filters (heuristic mapping over 16 buckets:
-  ``uuid`` / ``project`` / ``asset`` / ``scene`` / ``physics2d`` /
-  ``physics3d`` / ``rendering`` / ``ui`` / ``media`` / ``build`` /
-  ``interact`` / ``scaffold`` / ``composite`` / ``meta``). Zero
-  tools fall into ``"other"`` — that's tested as a regression guard
-  so new tools without a rule get surfaced.
-
-### Fixed — Dogfood-Flappy HIGH-ROI bugs (Bug A + Bug B)
-
-The first full dogfood run (building a Flappy Bird, report at
-``docs/dogfood-flappy-report.md``) surfaced two silent-corruption bugs
-in the most-used tools. Both are now fixed with regression tests.
-
-- **Bug A — ``cocos_add_script`` reassigned UUID on overwrite.**
-  Rewriting a .ts file (a high-frequency operation — agents edit a
-  field and re-save) silently minted a new UUID, which rewrote the
-  ``.ts.meta`` sidecar. Every scene that already referenced that
-  script by its compressed UUID immediately became a no-op component
-  at runtime. The fix: when no explicit ``uuid=`` is passed and a
-  ``.ts.meta`` already exists, preserve its UUID and only update the
-  source. Callers that genuinely want to fork the asset still pass
-  ``uuid=<new>`` explicitly. Return value gains a ``created: bool``
-  field to signal whether the UUID was freshly minted or preserved.
-  Corrupt-meta recovery stays automatic — unreadable JSON falls back
-  to a fresh mint so a partial-write can't permanently poison the
-  asset. (``cocos/project/assets.py::add_script``.)
-
-- **Bug B — ``add_node`` on a ``.prefab`` file skipped PrefabInfo for
-  children.** A prefab requires every node to have its own
-  ``cc.PrefabInfo`` entry with a unique ``fileId`` — Creator uses those
-  ids to reconcile per-instance overrides. The previous code left
-  child nodes with ``_prefab: null`` (the default ``_make_node``
-  shape, correct for scene nodes, malformed inside a prefab). Result:
-  the prefab would either refuse to instantiate or silently lose
-  overrides depending on engine version. Fix detects ``.prefab``
-  suffix and auto-appends a fresh PrefabInfo per node. Covers
-  ``add_node``, ``batch_ops.add_node``, ``duplicate_node``, and the
-  post-fix path of ``save_subtree_as_prefab`` (which previously only
-  emitted a single PrefabInfo for the root).
-
-### Added — ``cocos_add_and_attach_script`` composite (179 → 180 tools)
-
-Single-call wrapper for the 3-step dance agents ran on every script
-attach (write file → compress UUID → attach to scene node):
-
-```
-r = cocos_add_and_attach_script(project, "Bird", source,
-                                 scene, bird_node_id, props=...)
-# r["component_id"], r["uuid_compressed"], r["uuid_standard"], r["created"]
-```
-
-The two same-named ``cocos_add_script`` tools (project-level file
-writer vs scene-level component attacher) were the biggest trip-
-hazard in the dogfood — agents occasionally passed the standard UUID
-to the scene attacher and got a silently-broken component. This
-composite names the intent and returns both forms of the UUID so the
-caller never has to re-derive the compressed one. (``cocos/composites.py``,
-exposed as MCP tool in ``cocos/tools/composites.py``.)
-
-### Added — Gameplay scaffolds (171 → 175 tools)
-
-Before this pass, cocos-mcp did nothing to help with the *behavioural*
-layer — every game AI built from scratch re-wrote the same input
-singleton, score tracker, player controller, etc. in raw .ts. Six
-scaffold tools now generate canonical starter scripts + hand back
-both UUID forms so the next call is a plain ``cocos_add_script``
-attach:
-
-- ``cocos_scaffold_input_abstraction`` — InputManager.ts singleton
-  (WASD + arrows, diagonal-normalized moveDir, SPACE jumpPressed,
-  J / any-touch firePressed; one-frame triggers reset in lateUpdate).
-- ``cocos_scaffold_score_system`` — GameScore.ts singleton
-  (add/reset/current/high + localStorage persistence under
-  'cocos-mcp-high-score', with swallowed write failures for private
-  browsing / WeChat mini-game; optional @property scoreLabel +
-  highLabel auto-render).
-- ``cocos_scaffold_player_controller(kind)`` — 4 variants:
-  *platformer* (RigidBody2D + gravity, moveSpeed/jumpForce/
-  doubleJumpEnabled, ground-detection via velocity threshold);
-  *topdown* (no gravity, full moveDir);
-  *flappy* (single jump impulse on jumpPressed);
-  *click_only* (no physics body — tweens _lpos toward click; the
-  only variant that doesn't depend on InputManager).
-- ``cocos_scaffold_enemy_ai(kind)`` — 3 variants:
-  *patrol* (oscillate between @property patrolA↔patrolB, flip
-  optional mirrorSprite); *chase* (Vec3.distance with
-  chaseRadius/loseAggroRadius hysteresis, kinematic setPosition);
-  *shoot* (stationary turret, fireInterval cooldown, instantiate
-  bulletPrefab toward target).
-- ``cocos_scaffold_spawner(kind)`` — 2 variants: *time*
-  (interval + spawnBoxSize jitter + despawn-oldest queue at
-  maxActive); *proximity* (triggerRadius on @property player +
-  cooldown). Both parent spawned nodes under ``this.node.parent``
-  (explicitly not the spawner itself) + invoke optional @property
-  onSpawn(spawned) post-addChild.
-- ``cocos_scaffold_game_loop(states)`` — singleton state machine,
-  default states=[menu, play, over]. Each state generates paired
-  @property onEnter<PascalCase> + onExit<PascalCase> callbacks
-  (so ``"game_over"`` becomes onEnterGameOver). Validates state
-  names are identifier-safe + unique at scaffold time so a broken
-  .ts never lands.
-
-All scaffolds: 15 kind combinations × ~50-100 LOC TS each,
-embedded inline as Python triple-strings. Each template is
-hand-tuned for production quality (null-checks singletons, guards
-optional refs, uses hysteresis for ranges). Every @property is
-inspector-visible so designers tune numbers without code changes.
-
-### Added — Closed feedback loop (161 → 171 tools)
-
-``cocos_screenshot_preview`` lets the AI *see* its game; this
-batch adds the other half — *interact* + *read state*. The AI can
-now play-test what it built instead of building blind.
-
-- ``cocos_click_preview(url, x, y, button)`` — Playwright mouse
-  click at page coords.
-- ``cocos_press_key_preview(url, key)`` — Cocos KeyCode event
-  fires normally (``"Space"`` / ``"ArrowUp"`` / ``"a"`` / etc).
-- ``cocos_type_preview(url, text)`` — keyboard.type for text
-  fields.
-- ``cocos_drag_preview(url, from_xy, to_xy, steps)`` — mouse
-  move+down + ``steps`` interpolated moves + up, so Cocos drag-
-  detection fires (a raw A→B jump wouldn't).
-- ``cocos_read_preview_state(url, expression)`` — page.evaluate,
-  returns ``{ok, value, error}``; guarded so arbitrary user JS
-  can't crash the tool. Designed for games that expose
-  ``window.game`` in their GameManager.onLoad.
-- ``cocos_wait_for_preview(url, ms)`` — let async loads settle.
-- ``cocos_run_preview_sequence(url, actions)`` — ordered list of
-  click/key/type/drag/wait/read_state/screenshot actions in ONE
-  browser session (game state doesn't survive a reload). Per-
-  action failure doesn't short-circuit so earlier reads survive
-  a later bad click. Screenshot bytes come back hex-encoded for
-  JSON-safe MCP transport.
-- ``cocos_screenshot_preview_diff(before_png, after_png, threshold)``
-  — pure Pillow (no Playwright needed). Per-channel absolute-delta
-  threshold avoids flagging JPEG-like compression noise as
-  change. Returns
-  ``{width, height, total_pixels, different_pixels, diff_ratio}``.
-
-Same install-hint pattern as ``cocos_screenshot_preview``: missing
-playwright → ImportError with ``uv pip install playwright`` +
-``playwright install chromium``; missing chromium binary →
-RuntimeError with the install-step hint.
-
-### Added — Prefab subtree extraction (160 → 161 tools)
-
-Biggest existing prefab gap: the AI could create an empty prefab
-or instantiate one, but had no way to take an already-configured
-scene subtree (Enemy with Sprite + RigidBody + Collider +
-Animation + script all wired) and *export* it as a reusable
-prefab. Without this, "spawn ten enemies" was re-running the
-whole add_* stack ten times.
-
-- ``cocos_save_subtree_as_prefab(scene_path, root_node_id,
-  prefab_path, prefab_uuid?)`` — walks the subtree, transitively
-  collects every descendant cc.Node + component + inline helper
-  (cc.ClickEvent under Button, cc.EventHandler under Toggle).
-  Builds an old→new index map, deep-copies, rewrites ``__id__``
-  refs, mints fresh ``_id`` strings, wires cc.Prefab + cc.PrefabInfo
-  + writes the .prefab + meta.
-- Self-contained enforcement: any ``__id__`` pointing at a cc.Node
-  OUTSIDE the subtree raises ValueError naming the offender and
-  the component context. Cocos's prefab format can't represent
-  late-bound cross-scene refs; silent clipping would produce a
-  .prefab that crashes at instantiation. Atomic on failure (no
-  partial file written).
-- Asset ``__uuid__`` refs (SpriteFrame, clip, mesh, nested prefab)
-  survive unchanged — they travel via the asset DB.
-- Source scene is NEVER mutated. If the caller wants to replace
-  the raw subtree with a prefab instance, do an explicit
-  ``cocos_delete_node`` + ``cocos_instantiate_prefab`` — the
-  two-step is deliberate so a misfired call can't lose the source.
-
-Hidden-capability documentation: prefab files share the JSON-
-array shape of scenes, so every ``scene_builder`` mutation tool
-(add_sprite / add_button / batch_scene_ops / etc) works directly
-on a .prefab path. A regression-guard test pins this behaviour.
-
-### Added — UI/UX pass: design tokens + lint + presets + animations (135 → 160 tools)
-
-Six commits landed an entire design-system layer so AI-built UI
-stops looking "AI-random". Summary of what shipped:
-
-**Design tokens + theme swap** (``cocos_set_ui_theme`` +
-``cocos_get_ui_tokens`` + ``cocos_list_builtin_themes`` +
-``cocos_hex_to_rgba``):
-
-- 5 built-in themes: dark_game / light_minimal / neon_arcade /
-  pastel_cozy / corporate. Each ships the full preset vocabulary
-  (10 colors × 4 font sizes × 5 spacings × 4 radii).
-- ``cocos_add_label`` / ``add_button`` / ``add_sprite`` /
-  ``add_richtext`` gained ``color_preset`` / ``size_preset`` /
-  ``outline_color_preset`` kwargs. ``color_preset="primary"`` on
-  a button AUTO-DERIVES matching hover / pressed / disabled via
-  luminance-aware shading — one preset replaces four hand-picked
-  RGBA quadruples.
-- Fallback: un-themed projects resolve presets against dark_game
-  default so no lookup ever 404s.
-- Custom themes via ``custom={...}`` merge atop dark_game so
-  partial overrides still resolve every preset name.
-
-**UI composites**:
-
-- ``cocos_add_dialog_modal`` / ``add_main_menu`` / ``add_hud_bar``
-  (first batch) — full-screen dialog with buttons, vertical menu
-  with title + buttons, horizontal HUD row.
-- ``cocos_add_toast`` / ``add_loading_spinner`` / ``derive_theme``
-  — ephemeral notification, centered spinner with Animation
-  component driving rotation, helper to generate a custom theme
-  from a seed color.
-- ``cocos_add_card_grid`` — level select / shop / character
-  picker grid. variant="primary" cards auto-flip text color for
-  contrast.
-- ``cocos_add_styled_text_block`` — title + subtitle + divider +
-  body paragraph stacked; resolves sizes + colors from tokens;
-  body uses wrap + overflow=RESIZE_HEIGHT so long paragraphs
-  grow the block instead of clipping.
-
-**Responsive helpers** (``cocos_make_fullscreen`` /
-``cocos_anchor_to_edge`` / ``cocos_center_in_parent`` /
-``cocos_stack_vertically`` / ``cocos_stack_horizontally``):
-
-Collapse the Widget ``align_flags`` bitmask + Layout
-``layoutType`` + ``resizeMode`` + ``h_direction`` trio into five
-verbs. ``stack_*`` accept a token name (``"md"``) OR raw int for
-spacing/padding.
-
-**Animation presets** (``cocos_add_fade_in`` / ``add_slide_in`` /
-``add_scale_in`` / ``add_bounce_in`` / ``add_pulse`` /
-``add_shake``):
-
-Six entrance / feedback animations. ``add_shake`` oscillates
-around the node's CURRENT ``_lpos``, not around origin (the
-common bug that flings the node across the screen). Fixed a
-latent wrap_mode bug in ``create_animation_clip``: was
-hardcoded to 2 (WrapMode.Reverse — plays the clip once
-backwards!); now parameterized with default 1 (Normal, play
-once forward). Regression test locks all five enum values.
-
-**UI lint** (``cocos_lint_ui``) — 8 rules:
-
-- button_touch_target (<44×44 — iOS HIG / Material 48dp)
-- label_overflow_risk (overflow=NONE + no-wrap + long text in
-  narrow box)
-- ui_layer_mismatch (UI component on a non-UI_2D layer —
-  UICamera won't render it)
-- contrast_too_low (WCAG AA threshold per text-size tier — 3:1
-  for large, 4.5:1 for body. Nearest background resolves via
-  cc.Button._N$normalColor preferred, otherwise ancestor
-  cc.Sprite. 12-level ancestor walk.)
-- overlapping_buttons (same-parent, >25% of smaller's area —
-  skips cc.Layout-managed parents since Layout repositions at
-  runtime)
-- huge_font_small_box (UITransform.height < font_size × 1.2)
-- many_buttons_no_layout (≥6 button siblings without cc.Layout
-  — manual positioning at this scale drifts across resolutions.
-  cc.Layout type=NONE counts as "I manage my own layout" so
-  card_grid's self-positioned cards don't trip.)
-- nested_mask_perf (cc.Mask inside another Mask — each stencil
-  pass doubles).
-
-Lint caught two real bugs in our own composites during
-development (main_menu title box ratio, card_grid's hand-
-positioned cells); both fixed in the same commits.
-
-### Added — Post-build patch registry (131 → 135 tools)
-
-Cocos regenerates ``build/<platform>/`` from scratch every build, so
-manual edits to files with no Cocos source-config switch (style.css
-body bg, ``project.config.json`` fields beyond builder.json's surface,
-custom index.html) get wiped on every rebuild. This commit introduces
-a declarative patch registry at
-``settings/v2/packages/post-build-patches.json`` + auto-apply inside
-``cli_build``.
-
-**Three patch kinds** (in ``cocos/project/post_build_patches.py``):
-
-- ``json_set`` — dotted-path navigation, creates missing intermediate
-  dicts, refuses to descend into a non-dict (which would silently
-  corrupt user data).
-- ``regex_sub`` — ``re.sub`` with ``count=1``. Must match at least once
-  at apply time; a drifted pattern after a Cocos bump becomes an
-  explicit ``errors[0]`` entry rather than a silent regression.
-- ``copy_from`` — whole-file copy from a project-root-relative source
-  over the build target.
-
-**Four new MCP tools**:
-
-- ``cocos_register_post_build_patch(patches, mode='append'|'replace')``
-  — batched registration is atomic: one invalid patch in the list
-  fails the whole call and the registry file stays untouched.
-- ``cocos_list_post_build_patches`` — returns patches with indices for
-  later selective removal.
-- ``cocos_remove_post_build_patches(indices|platform|file)`` —
-  precedence: indices > platform+file AND filter. Calling with all
-  None is a no-op (explicit wipe requires ``register([], mode='replace')``
-  — forces the user to think twice about clearing the whole list).
-- ``cocos_apply_post_build_patches(platform, dry_run=False)`` —
-  normally ``cli_build`` runs this automatically on success; exposed
-  for dry-run preview and re-apply-without-rebuild.
-
-**Validation hardening** (at register time, not apply time — the right
-moment is when the author writes the patch):
-
-- ``kind`` in the supported set
-- ``file`` relative path, no ``..`` segments (path-injection guard)
-- ``copy_from`` source similarly constrained
-- ``regex_sub.find`` must compile
-- ``json_set.path`` non-empty; ``value`` must be present
-
-**cli_build integration**:
-
-- New ``apply_patches: bool = True`` param.
-- After ``success==True``, walks the registry for matching-platform
-  patches and applies them in order, **stopping on first error** so
-  patch failures can't cascade across files.
-- Result carries ``post_build_patches: {platform, dry_run, build_dir,
-  applied, skipped, errors, ok}``.
-- When the build itself passed but patches broke, ``success`` flips to
-  False and ``error_code`` is **``POST_BUILD_PATCH_FAILED``** with a
-  hint that points at ``cocos_list_post_build_patches`` — the caller
-  isn't sent to grep the Cocos log for a nonexistent problem.
-
-**Tests (+24, tests/test_post_build_patches.py)**:
-
-- Register: append vs replace, atomic-fail-on-bad-batch, rejects
-  absolute paths / ``..`` / unknown kinds
-- Remove: platform filter, index list, no-op-when-no-filter (safety)
-- json_set: simple, creates intermediates, refuses non-dict traversal
-- regex_sub: replaces, errors when pattern doesn't match
-- copy_from: overwrites target, errors if source missing
-- Apply: filters by platform, skips missing files (no raise), dry_run
-  doesn't touch fs, stops on first error (no cascade)
-- cli_build: auto-apply on success, ``apply_patches=False`` skips,
-  patch failure surfaces ``POST_BUILD_PATCH_FAILED``, no-patches-
-  registered still emits a consistent (empty) report shape
-
-### Added — Friction-reducer pass (130 → 131 tools)
-
-Four targeted fixes for the top "AI client gets stuck" failure modes.
-None add components; all reduce the number of round-trips between the
-orchestrating LLM and the tools when something doesn't work first try.
-
-**Creator path discovery** (``cocos/project/installs.py``):
-
-The hardcoded ``INSTALL_ROOTS`` misses common setups (symlinked
-locations, ``~/Applications`` on macOS, ``D:\`` drives). Added three
-precedence-ordered escape hatches:
-
-1. ``COCOS_CREATOR_PATH`` env var — pins a single install.
-2. ``COCOS_CREATOR_EXTRA_ROOTS`` env var — ``:``/``;`` separated
-   additional scan roots.
-3. ``$PATH`` probe — ``shutil.which("CocosCreator")`` then back-walk
-   to the install root.
-
-``find_creator``'s "no install" error now lists all four escape hatches
-(download + three env/PATH options). A bad ``COCOS_CREATOR_PATH`` falls
-through to auto-discovery rather than silently swallowing the error.
-
-**TS error structured parsing** (``cocos/errors.py``, ``cocos/build.py``):
-
-``classify_build_log`` already routes TS compile failures to
-``BUILD_TYPESCRIPT_ERROR``. Added ``parse_ts_errors()`` that extracts
-per-diagnostic ``{file, line, col, code, message}`` tuples from the
-``tsc``-format output in the log tail. When ``cli_build`` classifies
-the failure as TS, it attaches ``ts_errors: list[dict]`` to
-``BuildResult`` so the AI can Read+Edit each offending file directly
-instead of re-parsing the log.
-
-**Script UUID auto-compress** (``cocos/scene_builder/__init__.py``):
-
-``add_script`` previously required the 23-char compressed UUID form
-(what the engine resolves at runtime). Callers often copy-pasted the
-36-char standard form from ``cocos_list_assets`` / ``.ts.meta`` —
-scene saved fine, build succeeded, component became a silent no-op
-because the engine couldn't resolve the class. Now auto-compresses
-any 36-char dashed UUID before writing. Zero-risk change since the
-36-char path was already a silent bug.
-
-**Engine-module audit** (``cocos/scene_builder/modules.py`` +
-``cocos_audit_scene_modules``):
-
-Single biggest runtime-failure mode: attaching a component whose
-engine module is off in ``settings/v2/packages/engine.json``. Build
-artifacts are structurally fine, the scene loads, but the component
-class doesn't register and the feature silently does nothing.
-
-New tool cross-checks scene ``__type__``s against a 30+ entry
-``COMPONENT_REQUIRES_MODULE`` map vs. the project's ``engine.json``.
-Returns ``{ok, required, enabled, disabled, actions}`` where
-``actions`` is copy-pasteable ``cocos_set_engine_module`` + library
-clean commands. ``physics-2d-box2d`` / ``physics-2d-builtin``
-satisfies the ``physics-2d`` requirement (matches Cocos inspector
-semantics). Walks up from ``scene_path`` to find ``package.json`` when
-``project_path`` is None; raises explicitly if unfindable.
-
-``cc.Camera`` intentionally NOT in the map — every UI scene created
-via ``create_empty_scene`` attaches one and 2D builds work fine
-without base-3d. Only the genuinely 3D-exclusive renderers
-(MeshRenderer, DirectionalLight/SphereLight/SpotLight) require base-3d.
-
-**Tests (+16, tests/test_friction_reducers.py)**:
-
-- Creator path: ``COCOS_CREATOR_PATH`` pin / bad-pin fallback /
-  ``COCOS_CREATOR_EXTRA_ROOTS`` / PATH probe / error lists 4 hatches
-- TS errors: regex extraction / empty inputs / cli_build integration
-- UUID compress: 36→23 round-trip + 23-char no-op
-- Module audit: RigidBody2D flagged when physics-2d off /
-  ``physics-2d-box2d`` satisfies physics-2d / plain UI scene ok /
-  multiple missing flagged / walks up to find project / raises on
-  unfindable project
-
-### Added — 3D parity pass (108 → 130 tools)
-
-Grew the scene-building surface from "2D only" to "2D + baseline 3D
-mini-games end-to-end". Every new component's default value is lifted
-verbatim from cocos-engine v3.8.6 sources (`cocos/physics/framework/...`,
-`cocos/3d/lights/...`, `cocos/scene-graph/scene-globals.ts`,
-`cocos/ui/...`) and pinned by regression tests.
-
-**3D physics (+13 tools)** —
-`cocos_add_rigidbody_3d` plus all eight colliders (`add_{box,sphere,
-capsule,cylinder,cone,plane,mesh,terrain}_collider_3d`), two character
-controllers (`add_{box,capsule}_character_controller`),
-`cocos_create_physics_material` (writes a `.pmat` asset + meta; bind
-via `cocos_set_uuid_property(col_id, "_material", uuid)`), and
-`cocos_set_physics_3d_config` (gravity, timestep, sub-steps, sleep
-threshold; writes `settings/v2/packages/physics.json`, default
-gravity **-10 m/s² — NOT pixel units like set_physics_2d_config**).
-`ERigidBodyType` is exported as `sb.RIGIDBODY_{DYNAMIC,STATIC,KINEMATIC}`
-because the engine uses bitmask values (1/2/4, non-contiguous) that
-are trivial to get wrong otherwise.
-
-**3D rendering (+5 tools)** —
-`cocos_add_{directional,sphere,spot}_light` with full HDR/LDR
-illuminance pairs, `_staticSettings` sub-object, PCF shadow mode, and
-(for DirectionalLight) the CSM block. `cocos_add_mesh_renderer`
-(materials array = one per submesh, `_shadowCastingMode` / `_shadowReceivingMode`,
-`_reflectionProbeId`) and `cocos_add_skinned_mesh_renderer`
-(`_skinningRoot` is a **Node `__id__` reference, NOT a uuid** — a
-common third-party bug, documented in the tool hint).
-
-**Scene-global fog (+1 tool)** —
-`cocos_set_fog` mirrors `set_ambient` / `set_skybox` / `set_shadows`,
-lazy-creates `cc.FogInfo` + links it under `cc.SceneGlobals.fog` if
-the scene predates this commit. Supports all four fog modes
-(LINEAR / EXP / EXP² / LAYERED).
-
-**UI polish (+3 tools)** —
-`cocos_add_webview` (embedded browser pane for ToS / activity pages),
-`cocos_add_scroll_bar` (companion to `ScrollView`, with `_handle` +
-`_scrollView` as `__id__` refs), `cocos_add_page_view_indicator`
-(dots row for `PageView` navigation).
-
-**Build polish (+6 params on existing `cocos_build`)** —
-`source_maps`, `md5_cache`, `skip_compress_texture`, `inline_enum`,
-`mangle_properties` booleans + `build_options: dict[str, Any]` catch-all,
-all joined into the Cocos CLI's `--build "k=v;k=v;..."` flag. Explicit
-params win over dict conflicts; values containing `;` or `=` (which
-would corrupt CLI parsing) are rejected with `ValueError` up-front.
-
-### Fixed — 2D joint class-name mismatches (108 from 109)
-
-Two of the nine 2D joint tools emitted `__type__` strings that Cocos
-3.8 doesn't recognize. Verified against cocos-engine v3.8.6 sources
-(`cocos/physics-2d/framework/components/joints/`): only **eight** joint
-files exist, and neither `weld-joint-2d.ts` nor `motor-joint-2d.ts` is
-among them. Scenes built with the old tools silently had no joint at
-runtime.
-
-- **Renamed** `cocos_add_weld_joint2d` → `cocos_add_fixed_joint_2d`,
-  emitting `cc.FixedJoint2D` (the real class).
-- **Removed** `cocos_add_motor_joint2d` — `cc.MotorJoint2D` doesn't
-  exist in 3.8. The follow-target use case is covered by
-  `cocos_add_relative_joint2d` via `_linearOffset` + `_angularOffset`.
-
-Breaking change for any caller hitting the two old tool names, but
-those calls were producing broken scenes anyway — "tool not found"
-replaces silent runtime failure with a clear error.
-
-### Added — Structured observability
-
-- **`cocos/errors.py`** — central error surface with 8 `error_code`
-  constants (`CREATOR_NOT_FOUND` / `BUILD_TIMEOUT` / `BUILD_FAILED` /
-  `BUILD_MISSING_MODULE` / `BUILD_TYPESCRIPT_ERROR` /
-  `BUILD_ASSET_NOT_FOUND` / …). `classify_build_log(log_tail)` pattern-
-  matches common Cocos CLI failure signatures; `cli_build` attaches
-  `{error_code, hint}` to every failure path so the LLM can recover
-  without reading the log tail (e.g. "physics-2d module is off →
-  `cocos_set_engine_module`"). TypeScript-error pattern is intentionally
-  more specific than module-missing so `error TS2307: Cannot find module`
-  classifies as TS error, not module error.
-- **`cocos/types.py`** — 8 `TypedDict` return-shape contracts
-  (`BuildResult` / `ValidationResult` / `BatchOpsResult` /
-  `SceneCreateResult` / `PreviewStart/Stop/Status/Result`,
-  `StructuredError`). `_BuildCommon` + `total=False` cleanly separates
-  always-present from failure-only fields.
-- **`tests/test_types.py`** — shape-drift tests reflect each tool's
-  runtime dict keys against its TypedDict's `__annotations__`. Catches
-  divergence that mypy can't (because `total=False` makes all keys
-  optional from a static-typing perspective).
-- **`find_creator`** — no-install error now names the recovery tool
-  (`cocos_list_creator_installs`) and points to the Cocos Creator
-  download page; version-mismatch error lists the locally-available
-  versions.
-- **`cocos_batch_scene_ops`** description now leads with
-  "PREFERRED for ≥3 sequential mutations" so LLMs reach for it
-  unprompted instead of firing ten individual `add_*` calls.
-
-### Performance
-
-- **Session-level scene read cache** (`cocos/scene_builder/_helpers.py`)
-  — `_load_scene` keyed by resolved abspath + `st_mtime_ns`, LRU cap
-  of 8 scenes. `_save_scene` refreshes the cache after a successful
-  write, so the next tool call hits instead of re-parsing the file we
-  just wrote. External edits (editor save, git checkout) bump mtime and
-  the cache self-invalidates. Exported `invalidate_scene_cache()` for
-  tests / manual sync.
-- **Creator install list cached** via `functools.lru_cache(maxsize=1)`.
-  `list_creator_installs()` was walking `/Applications/Cocos/Creator`
-  every init / build call; cache hit makes the init path noticeably
-  snappier on repeat runs. `invalidate_creator_installs_cache()` exported
-  for the "I just installed a new Creator version" case.
-- **Merged 3 + 4 redundant `rglob` scans** in `get_project_info` and
-  `list_assets` into single `assets/**` walks with suffix dispatch.
-  Noticeable on large projects; suffix dispatch preserves original
-  behavior (verified by existing tests).
-- **Explicit `timed_out: True`** on `cli_build` result when a build
-  exceeds `timeout_sec` — previously it was indistinguishable from a
-  non-timeout `exit_code = -1` crash.
-
-### Fixed — narrower exception handling
-
-- `scene_builder/batch.py` — replaced `except Exception` with
-  `(KeyError, TypeError, ValueError, IndexError)` so our own
-  implementation bugs (AttributeError, NameError, RuntimeError, ...)
-  surface with a traceback instead of being silently reported as
-  "op failed". Caller-mistake exceptions still get formatted into a
-  per-op error dict.
-
-### Changed — module-level refactors
-
-- **`cocos/project.py` 1099 lines → 7-submodule package** under
-  `cocos/project/`: `installs.py` (Creator detect + `init_project`),
-  `assets.py` (script/image/audio/resource import + `list_assets` +
-  `get_project_info`), `animation.py` (`.anim` builder), `skeletal.py`
-  (Spine + DragonBones), `tiled.py`, `atlas.py` (SpriteAtlas `.pac`),
-  `gen_image.py` (AI asset wrapper). Plus new `physics_material.py`
-  for `.pmat` assets. `__init__.py` re-exports the full public surface
-  so `from cocos import project as cp; cp.list_assets(...)` is
-  unchanged, and the monkey-patch used by tests
-  (`monkeypatch.setattr(cp, "list_creator_installs", ...)`) still
-  takes effect — `find_creator` uses a late `from cocos.project
-  import list_creator_installs` inside its body to pick up the patch.
-- **`cocos/scene_builder/__init__.py` 1811 lines → 4 new submodules**:
-  `physics.py` (RigidBody2D + 3 colliders + 8 Joint2D), `ui.py`
-  (buttons/layout/progress/scroll/toggle/editbox/slider/masks/RichText/
-  sprite variants/UIOpacity/SafeArea/PageView/ToggleContainer/
-  MotionStreak/ScrollBar/PageViewIndicator/WebView + event builders),
-  `media.py` (audio/anim/particle/camera/spine/DB/tiled/video +
-  scene-globals setters including fog), `prefab.py` (create +
-  instantiate + `_shift_id_refs`). Core `__init__.py` down to 685
-  lines (scene lifecycle + node + basic component mutators +
-  validation + generic `add_component`). Submodules that call back
-  into `add_component` use a late `from cocos.scene_builder import
-  add_component` to stay load-order-safe.
-- **`cocos/scene_builder/rendering.py` (new)** — 3D lights +
-  MeshRenderer + SkinnedMeshRenderer, with engine-matched constants
-  `SHADOW_CAST_{OFF,ON}`, `SHADOW_RECV_{OFF,ON}`, `PCF_{HARD,SOFT,
-  SOFT_2X,SOFT_4X}`, `REFLECT_{NONE,BAKED_CUBEMAP,PLANAR,BLEND}`,
-  `CAMERA_DEFAULT_MASK`.
-- **`cocos/scene_builder/physics_3d.py` (new)** — 3D physics, with
-  `RIGIDBODY_{DYNAMIC,STATIC,KINEMATIC}` + `AXIS_{X,Y,Z}` exported
-  as module constants so callers don't have to memorize the
-  non-contiguous engine enum values.
-- **`cocos/tools/{physics_3d,rendering_3d}.py` (new)** — MCP
-  registrations for the 3D tools, kept in separate modules from 2D
-  (`physics_ui.py`) so the 2D/3D surfaces can evolve independently.
-
-### Tests
-
-Test count: **166 → 226 (+60)**. New files:
-
-| File | Tests | Covers |
-|---|---|---|
-| `test_physics_3d.py` | 18 | RigidBody3D defaults (+ non-contiguous enum regression guard) · parametrized collider shape fields · MeshCollider UUID wiring · CharacterController defaults · PhysicsMaterial `.pmat` asset shape + engine-default parity · `set_physics_3d_config` round-trip · scene validates with full 3D physics stack |
-| `test_rendering_3d.py` | 10 | Per-light-type defaults · regression guard that all three lights carry the base `cc.Light` fields · MeshRenderer material array + shadow flag mapping + ModelBakeSettings nested shape · SkinnedMeshRenderer skeleton UUID + skinning_root `__id__` ref · scene validates with lit 3D render stack |
-| `test_step3_polish.py` | 12 | FogInfo lazy-create + engine-default regression + idempotency · WebView URL round-trip · ScrollBar refs + null-omission · PageViewIndicator `cc.Size` + `__expectedType__` shape · `cli_build` dict + convenience-param merge semantics + unsafe-char guard |
-| `test_errors.py` | 7 | `make_error` shape · `classify_build_log` pattern dispatch (TS / module / asset) · find_creator enrichment (lists available + names recovery tool) |
-| `test_types.py` | 7 | Reflects `BuildResult` / `ValidationResult` / `BatchOpsResult` / `SceneCreateResult` / `PreviewStatusResult` `__annotations__` against runtime dict keys; all success + failure + timeout paths |
-| `test_perf_optimizations.py` extension | +3 | Scene read cache hit (shared-ref return) · mtime invalidation on external write · LRU eviction past size cap |
-
-All previous 166 tests continue to pass; 2D joint parametrize drops 1
-(motor) and renames 1 (weld → fixed). CI still runs Ubuntu / macOS /
-Windows × Python 3.11 / 3.12.
+## 📊 当前状态（2026-04）
+
+- **184 工具**（起步 80）· **741 pytest**（起步 45）· **mypy 0 / ruff 0**
+- CI 矩阵：Ubuntu / macOS / Windows × Python 3.11 / 3.12
+- 3D 组件字段默认值**逐一对齐 cocos-engine v3.8.6 源码**
 
 ---
 
-### Earlier work in this Unreleased cycle (45 → 108 tools, 45 → 166 tests)
+## 🔁 dogfood 驱动的关键修复
 
-What follows is the prior draft of `[Unreleased]` covering the publish-
-readiness + 9-joint + lighting + AI-asset passes that shipped before
-the 3D parity work above. It's kept here for continuity until the next
-release tag; minor adjustments (joint-name supersession) applied in
-place so the two halves reconcile.
+首次完整 dogfood（Flappy Bird，详见 [dogfood-flappy-report.md](./dogfood-flappy-report.md)）暴露了最常用工具里的三个**静默损坏型**问题，都做了回归测试锁定。
 
-#### Added — 29 new tools across four feature passes
+### Bug A — `cocos_add_script` 覆盖时重写 UUID
 
-#### Publish-readiness (4 tools, 105 → 109)
-- **`cocos_set_native_build_config(platform, …)`** — configures iOS / Android
-  fields in `settings/v2/packages/builder.json`: package name, orientation
-  (portrait/landscape/auto), icon/splash paths, iOS team ID, Android API
-  levels, keystore signing config, and `.aab` toggle. Partial updates: pass
-  `None` to leave a field unchanged across runs.
-- **`cocos_set_bundle_config(folder_rel_path, …)`** — marks a folder as an
-  Asset Bundle by patching its directory `.meta` sidecar with `isBundle /
-  bundleName / priority / compressionType / isRemoteBundle`. Creates the
-  meta if Cocos Creator hasn't seen the folder yet. Critical for any game
-  past a few MB that needs lazy / per-level loading via
-  `cc.assetManager.loadBundle()`.
-- **`cocos_set_wechat_subpackages([{name, root}, …])`** — writes the
-  `wechatgame.subpackages` array. WeChat hard-caps the main package at
-  4 MB; without subpackages, any non-trivial game gets rejected at upload.
-  Coexists with `cocos_set_wechat_appid`. Replaces the list atomically.
-- **`cocos_add_video_player(node, …)`** — attaches `cc.VideoPlayer`. Two
-  modes: `resource_type=1` + `clip_uuid` for local cc.VideoClip assets
-  (cinematic intro), or `resource_type=0` + `remote_url` for streaming
-  (rewarded video ads). Plus volume/mute/loop/fullscreen flags.
+**现象**：改一个 `.ts` 文件的内容再调用 `add_script` 会**静默**生成新 UUID，改写 `.ts.meta`。场景 JSON 里原来通过压缩 UUID 引用这个脚本的 Component 瞬间变哑——组件还在但不执行任何代码。调用方没有任何错误提示。
 
-#### Cocos Creator coverage gaps (14 tools, 91 → 105)
-- **`cocos_instantiate_prefab(scene, parent, prefab_path, name?, pos?, scale?)`**
-  — the most-requested missing piece. Reads a .prefab, deep-clones its node
-  tree into the target scene, shifts every internal `__id__`, refreshes
-  `_id` strings + each `cc.PrefabInfo.fileId` so multiple instances don't
-  alias, and parents the new root under `parent`. Treats the prefab as
-  unlinked (one-shot copy; edits to the source .prefab don't propagate
-  back into already-instantiated nodes).
-- **`cocos_set_sprite_frame_border(meta_path, top, bottom, left, right)`** —
-  configures 9-slice border in pixels on an existing sprite-frame meta.
-  Idempotent. `cocos_add_image` and `new_sprite_frame_meta()` now also
-  accept a `border` keyword argument. Required for any cc.Sprite type=SLICED
-  (rounded UI buttons, panels, dialog frames).
-- **9 × `cocos_add_*_joint2d`** — intended to ship the full Box2D joint
-  family: `add_distance_joint2d / add_hinge_joint2d / add_spring_joint2d /
-  add_mouse_joint2d / add_slider_joint2d / add_wheel_joint2d /
-  add_weld_joint2d / add_relative_joint2d / add_motor_joint2d`. Each
-  takes `connected_body_id` (the OTHER body's RigidBody2D component id;
-  `None` means anchor to world). Unlocks pendulum / vehicle / chain /
-  rope / suspension / weld-and-shatter games. **(Superseded:** weld
-  was later renamed to `add_fixed_joint_2d` and motor was removed — see
-  the 2D joint fix note above. Effective shipped set is 8 joints.**)**
-- **3 × scene-globals setters**: `cocos_set_ambient` (sky/ground colors,
-  illuminance), `cocos_set_skybox` (envmap UUID, HDR, lighting type),
-  `cocos_set_shadows` (planar shadow plane + color). Each looks up the
-  cc.AmbientInfo / SkyboxInfo / ShadowsInfo by `__type__` rather than
-  hard-coded array index, so they keep working after arbitrary node edits.
+**影响**：dogfood 里 GameScore.ts 重写一次，3 个引用它的节点全炸，排查了半小时才定位到 meta 里 UUID 被替换。
 
-#### Quality-of-life
-- GitHub Actions CI matrix (Ubuntu / macOS / Windows × Python 3.11 / 3.12)
-  running `ruff`, `mypy`, and `pytest`.
-- Startup log line reporting the number of registered MCP tools so the
-  actual count is verifiable without grepping source.
-- `pyproject.toml` exposes a `[dev]` extras set (`pytest`, `ruff`, `mypy`)
-  and is the single source of truth for dependencies.
-- `CHANGELOG.md` (this file).
+**修复**：
+- 默认无 `uuid=` 参数时，存在 `.ts.meta` 就**复用原 UUID**，只覆盖源码
+- 确实要强行换 UUID 的调用方显式传 `uuid=<new>`
+- 返回值加 `created: bool` 字段，调用方能区分"新建"还是"沿用"
+- 损坏的 meta（JSON parse 失败）自动回退到新建——避免 partial-write 永久毒化资源
 
-#### Performance
+文件：[cocos/project/assets.py::add_script](../cocos/project/assets.py)
 
-- **`cocos_batch_scene_ops` extended from 15 → 27 op types**, adding
-  `add_widget / add_camera / add_layout / add_progress_bar /
-  add_audio_source / add_animation / add_mask / add_richtext` plus
-  `set_scale / set_rotation / set_layer / set_uuid_property`. Real
-  measurement on a 50-panel UI build: 200 sequential tool calls = **4293 ms**,
-  same workload as one batch call = **33 ms** → **130× speedup**.
-- **`COCOS_MCP_SCENE_COMPACT=1` env var** flips `json.dump(indent=2)` to
-  `separators=(",", ":")`. Scene file size −41% (355 → 209 KB on the 500-
-  object benchmark); per-write IO modestly faster too. Default off so
-  human-edited scenes still git-diff cleanly.
-- **`gen_asset.py` on-disk cache** keyed by SHA-256 of `(provider, model,
-  prompt, size, seed)`. Cache lives at `tempfile.gettempdir()/cocos-mcp-gen/cache/`.
-  Same prompt re-generated → cache hit, no API call. Bypass with `--no-cache`.
-  Zhipu cache key omits seed (API doesn't honor it); Pollinations cache
-  key includes it.
+### Bug B — `add_node` 在 prefab 文件上不写 PrefabInfo 子节点
 
-#### Changed
+**现象**：prefab 要求**每个节点**都有自己的 `cc.PrefabInfo` 入口，`fileId` 要唯一（Creator 用它对齐 per-instance override）。老代码对 prefab 文件上的 `add_node` 沿用了 scene 节点的默认 `_prefab: null`——在 scene 里是对的，但在 prefab 里就是破格式。
 
-- **`server.py` 1222 → 60 lines.** All 91 `@mcp.tool()` definitions moved
-  into `cocos/tools/{core,scene,physics_ui,media,build}.py`; each module
-  exposes a `register(mcp)` and the entrypoint just calls
-  `tools.register_all(mcp)`.
-- **`cocos/scene_builder.py` is now a package.** Private value/factory
-  helpers and the property auto-wrap pair live in `_helpers.py`; the
-  `batch_ops` mega-switch lives in `batch.py`. Public API is unchanged —
-  `from cocos import scene_builder as sb; sb.add_uitransform(...)` still
-  works.
-- **`start_preview` / `stop_preview` rewritten cross-platform.**
-  `python3` → `sys.executable`, `bash -c "lsof …"` → `socket.bind` probe,
-  `os.setpgrp` / `os.killpg` → `subprocess.terminate()` (POSIX SIGTERM,
-  Windows TerminateProcess). The Windows CI leg can now reach
-  `cocos_start_preview` without `AttributeError`.
-- **`cocos_clean_project` is now strict.** Unknown `level` argument used
-  to silently fall back to `"default"` (clean build+temp), masking typos
-  like `"lib"` meaning `"library"`. Now raises `ValueError`.
-- **`init_project` returns `skipped_files: list[str]`** so callers know
-  when the destination already had files that were left in place rather
-  than overwritten.
-- Build & preview log paths now use `tempfile.gettempdir()` instead of
-  hard-coded `/tmp`, fixing Windows compatibility.
-- `Pillow` is imported lazily inside `cocos/meta_util.py`, so non-image
-  meta helpers work in slim environments without Pillow installed.
-- `Dockerfile` installs via `pip install .` (reads `pyproject.toml`).
+**影响**：实例化这种 prefab 时子节点 override 解析会崩；Creator 不会报错，只会把 override 静默丢掉。
 
-#### Fixed
+**修复**：`add_node` / `batch_scene_ops.add_node` 检测 `.prefab` 路径后自动生成 PrefabInfo + `fileId`，并保证同 prefab 内 fileId 唯一。
 
-- **`cocos/project.py::generate_and_import_image`** was calling
-  `os.environ` and `sys.executable` without ever importing `os` or `sys`,
-  so the `cocos_generate_asset` MCP tool would `NameError` every time.
-  Caught by the new ruff F821 check.
-- **`cocos/uuid_util.py::decompress_uuid`** now chains the underlying
-  `KeyError` via `raise … from e` for clearer tracebacks.
-- **File-handle leak in `start_preview`** — `subprocess.Popen(stdout=open(…))`
-  left the Python file object dangling; long-running MCP servers would
-  accumulate FDs. Now `open()` → `Popen` → `close()` (subprocess dup'd it).
-- **Loop variable shadow in `cli_build`** — `for f in build_dir.glob(...)`
-  was clobbering the earlier `with open(log_path) as f:` binding, confusing
-  static checkers (mypy reported `attr-defined`). Renamed loop var to
-  `entry`.
-- **Two missing docstrings** caught by the new tool-registration tests:
-  `cocos_set_node_position` and `cocos_set_node_active`. AI clients pick
-  tools by description, so empty descriptions silently degraded selection.
-- **`.env` parser strips surrounding quotes.** `KEY="value"` and
-  `KEY='value'` no longer leak the literal quote characters into HTTP
-  Authorization headers (which used to cause silent 401 against Zhipu).
-  Mismatched / unterminated quotes are preserved as-is.
-- **Two `bare except: pass` blocks narrowed**: `cocos/build.py:167`
-  cleaned up by the cross-platform preview rewrite; `cocos/project.py:210`
-  (`_read_uuid`) narrowed to `(OSError, json.JSONDecodeError)` so
-  programming bugs no longer get swallowed.
-- **mypy 13 errors → 0**:
-  - `get_project_info` returned `dict[str, Any]` but mypy inferred
-    `dict[str, str]` from the first key (`{"project_path": str(p)}`)
-    and rejected subsequent bool/None/list assignments.
-  - `list_assets`, `_build_anim_json`, and `create_prefab`'s `objects = []`
-    now have explicit `: list[<type>] = []` annotations.
-  - `create_sprite_atlas / add_spine_data / add_dragonbones_data /
-    add_tiled_map_asset` widened `list[str | Path]` parameters to
-    `Sequence[str | Path]` (covariant) so MCP-tool wrappers passing
-    `list[str]` no longer error.
+### Bug C — MCP 工具目录有时刷新不及时
 
-#### Removed
+**现象**：deferred tool 目录会 cache 在 Claude 客户端的 session 启动时，**之后注册的新工具看不到**。dogfood 里一开始找不到 scaffolds / lint / audit / save-subtree 等工具，还以为没实现，最后发现是目录 stale。
 
-- `requirements.txt` (superseded by `pyproject.toml`).
+**修复**：新增 `cocos_list_tools` 做运行时自省，返回 server 当前真正注册的工具表，按 16 个 category 分桶。agent 可以自诊断"这套工具版本是不是最新的"。
 
-#### Tests
+---
 
-Test count: **45 → 166 (+121)**. Coverage: **45% → 72% (+27)**.
+## 🧩 Cocos 3.8 字段漂移对齐
 
-| File | Tests | Covers |
+Cocos 小版本升级会静默改字段名、默认值、甚至枚举编码。直接读写 JSON 这种路线的本质风险就是得一个个追。以下是截至 3.8.6 验证过的关键漂移：
+
+### AutoAtlas `.pac` shape（3.8 改了序列化布局）
+
+| 维度 | 老写法（错） | 3.8 正确写法 |
 |---|---|---|
-| `test_uuid.py` | 5 | UUID compression round-trip, error paths |
-| `test_meta.py` | 6 | script / scene / prefab / sprite-frame meta |
-| `test_scene_builder.py` | 33 | scene CRUD, validate, batch, components |
-| `test_project.py` | 11 | `add_script / add_image / list_assets / find_creator` |
-| `test_build.py` | 13 | mocked `cli_build`, settings JSON, strict `clean_project` |
-| `test_perf_optimizations.py` | 11 | compact mode, batch ops, gen_asset cache, .env quotes |
-| `test_new_features.py` | 23 | 9-slice, lighting setters, 9 joints, prefab instantiation |
-| `test_publish_features.py` | 15 | native build config, bundle config, wechat subpackages, video player |
-| `test_tools_registration.py` | 11 | `register_all` smoke + wrapper round-trips through tool manager |
-| `test_make_transparent.py` | 6 | chroma key on synthetic 3-region PNG, low/high ramp, feather |
-| `test_gen_asset.py` | 12 | URL build, size snap, watermark removal, mocked HTTP for both providers |
-| `test_project_assets.py` | 20 | audio / resource / animation clip / atlas / Spine / DragonBones / TiledMap / mocked `generate_and_import_image` |
+| `.pac` body | 打包配置 in-line（maxWidth / padding / algorithm） | 单行 marker `{"__type__": "cc.SpriteAtlas"}`，**配置全挪到 `.pac.meta` userData** |
+| Meta `ver` | `"1.0.7"` | **`"1.0.8"`**（版本闸门，不匹配**静默拒绝**）|
+| Meta `userData` | `{}` | **17 个必需 key**：`removeTextureInBundle` / `removeImageInBundle` / `compressSettings` / 嵌套 `textureSetting` / ... |
+| Algorithm | `"MaxRect"` | **`"MaxRects"`**（注意复数）|
+| Defaults | 2048 / powerOfTwo=true / filterUnused=false | 3.8 默认 **1024 / false / true** |
 
-CI runs the whole suite under Ubuntu / macOS / Windows × Python 3.11 / 3.12.
+这些错误**不会构建失败**，Creator 只会"按默认兜底"——hurts that 就是"构建成功但没打 atlas，draw call 没降"这种幽灵 bug。
 
-### Future work
+### UI + Audio 字段漂移
 
-All three items called out in the previous Unreleased draft have been
-addressed in the 3D-parity pass above:
+`Button` / `Layout` / `AudioSource` 等组件在 3.8 里有若干字段重命名或形状变化。典型的：
 
-- ✅ `scene_builder/__init__.py` refactor — now 685 lines; logic split
-  across `physics.py` / `physics_3d.py` / `ui.py` / `media.py` /
-  `prefab.py` / `rendering.py` + `_helpers.py` / `batch.py`.
-- ✅ 3D primitives — DirectionalLight / SphereLight / SpotLight +
-  MeshRenderer + SkinnedMeshRenderer + full 3D physics (RigidBody +
-  8 colliders + 2 CharacterControllers + PhysicsMaterial) shipped.
-- ✅ `cli_build` observability — timeout is now distinguishable and
-  failure paths carry `error_code` + `hint`.
+- `AudioSource._clip` vs `clip`
+- `Button._pressedColor` 的 Color 形状从 4 元数组变 object / 反过来
+- `Layout` 的 spacing / padding 默认值调整
 
-Remaining gaps deferred for a later release:
+修复方式：每个漂移点都加了一个针对性的回归测试（`tests/test_new_features.py`、`tests/test_ui_batch*.py`），值 drift 一旦出现就测试失败。
 
-- **Marionette AnimationController** — 3.8's state-machine animation
-  system. Required for humanoid 3D skeletal animation; MeshRenderer
-  + SkinnedMeshRenderer alone can't drive it.
-- **3D constraints** — `cc.HingeConstraint` / `cc.PointToPointConstraint`
-  / `cc.ConfigurableConstraint` (3D equivalent of the 2D joint family).
-- **`cc.PostProcess`** — Bloom / HBAO / ColorGrading / FXAA, reachable
-  today via generic `cocos_add_component` but no friendly wrappers.
-- **Terrain asset creation** — `cc.Terrain` + heightmap generation;
-  `cocos_add_terrain_collider_3d` accepts a UUID but we can't yet
-  create the backing asset. Lower priority because most mini-games
-  use flat geometry.
-- **`cc.ReflectionProbe` / `cc.LightProbeGroup`** — needed for PBR
-  materials to look right. Rare in mini-games.
-- **`cc.PostProcessStack`** — requires pipeline-specific serialization
-  that varies between built-in and custom render pipelines.
+### 物理字段漂移 + ERigidBodyType bitmask
 
-## [1.1.0] — "detail pass"
+**最坑的一个**：`ERigidBodyType.DYNAMIC = 1 / STATIC = 2 / KINEMATIC = 4`——这是 **bitmask 不是序数**。当时我们写成 0/1/2，引擎就按 0 = none 处理，rigid body 变成不受重力也不响应冲量的"鬼魂"。
 
-### Added
-- 2D physics configuration tool (`cocos_set_physics_2d_config`).
-- UI components: `PageView`, `ToggleContainer`, `MotionStreak` — bumps
-  tool count to ~90.
-- `install.sh` one-liner installer targeting `~/.claude/mcp-servers/cocos-mcp`.
+**教训**：Cocos 的所有"看起来像枚举"的数字字段都要查 engine 源码确认是 enum 还是 bitmask。回归测试里用**显式数值**锁定：
 
-### Fixed
-- `cocos_validate_scene` gained 3 extra runtime-safety checks that
-  previously surfaced only after CLI build.
-- `ProgressBar.barSprite` is now serialized as a proper `{__id__: N}`
-  reference instead of a bare integer.
-- Several interactive-component event bindings now round-trip through
-  the editor correctly.
-- `Label` overflow / wrap / outline parameters and complete enum
-  constants table are documented in `cocos_constants`.
+```python
+# tests/test_physics_3d.py
+assert ERigidBodyType.DYNAMIC == 1   # NOT 0
+assert ERigidBodyType.STATIC == 2
+assert ERigidBodyType.KINEMATIC == 4
+```
 
-## [1.0.2]
+### `physics-2d-box2d` 子模块识别
 
-### Added
-- `cocos_generate_asset` — built-in AI image generation via 智谱
-  CogView-3-Flash (free in CN) or Pollinations Flux.
-- `cocos_create_sprite_atlas` — packs multiple PNGs into a single
-  SpriteAtlas asset.
+Cocos 引擎模块有父子关系：`physics-2d` 是父，`physics-2d-box2d` / `physics-2d-builtin` 是子实现。RigidBody2D 要求的是**父模块存在 + 至少一个子实现启用**。
 
-### Fixed
-- `cocos_attach_script` no longer auto-wraps raw integer property values
-  as `__id__` references (broke numeric `@property` fields).
-- UI render components (Sprite, Label, Graphics…) now auto-attach a
-  matching `UITransform` if the target node lacks one.
+内置的 `COMPONENT_REQUIRES_MODULE` 映射表里把这层识别做对了——启用 `physics-2d-box2d` 也能满足 `physics-2d` 要求，跟 Cocos 自己的语义一致。
 
-## [1.0.1]
+### `batch_ops` 参数对齐（dogfood v2 follow-up）
 
-### Added
-- `FilledSprite` / `SlicedSprite` / `TiledSprite` component tools.
-- `cocos_add_image(as_resource=True)` to drop PNGs under
-  `assets/resources/` for runtime `resources.load()`.
+`batch_ops` 里的 `add_node` / `set_position` / `set_scale` 参数名**曾经**跟 `sb.add_node` / `set_node_*` 直接 API 不一样：
 
-## [1.0.0] — initial release
+```python
+# 直接 API
+sb.add_node(scene, parent, "Bird", lpos=[0, 0, 0], lscale=[1, 1, 1])
 
-- Headless Cocos Creator 3.8 MCP server.
-- UUID compression (standard ↔ 23-char base64 short form).
-- Project init from built-in templates, asset import, scene/prefab
-  JSON generation, headless CLI build, and local HTTP preview.
-- ~80 MCP tools covering nodes, UI, physics, media, animation, tilemap,
-  Spine / DragonBones, and build/publish.
+# 老的 batch_ops
+{"op": "add_node", "name": "Bird", "x": 0, "y": 0, "z": 0, "sx": 1, ...}  # 不同名
+```
+
+agent 按直接 API 的签名传 `lpos=(x, y, z)` tuple 给 batch，**静默被忽略**，节点全在 (0,0,0)、缩放默认 1。更糟的：batch 版的 `add_node` **从来就没读 lscale**（不管 tuple 还是 scalar），已经是 latent bug 一年了。
+
+**修复**：三个统一 helper（`_resolve_lpos` / `_resolve_lscale` / `_resolve_xyz`）接受**两种形式**，tuple 优先，老的 scalar 写法向后兼容。
+
+---
+
+## 🎯 架构决策
+
+### `cocos_batch_scene_ops` 为什么是第一优先级工具
+
+**动机**：首次 dogfood 暴露了"200 次工具调用跑单节点 add / setter" → 每次 tool call 都要重新解析 scene JSON → 巨慢。
+
+**测量**：
+- 200 个工具调用：**4293ms → 33ms（130×）**
+- 单次 read + 单次 write 跑完整批 op；27 种 op 类型
+
+**实现**：`cocos/scene_builder/batch.py` 里统一 dispatch，同一个 `_load_scene` LRU 缓存 + 最后一次 `_save_scene`。错误捕获**per-op**，一个 op 失败不中断整批，返回 `{index: error}`。
+
+**推广**：工具描述首行写了 `PREFERRED for ≥3 sequential mutations`，LLM 会优先使用。
+
+**dogfood v2 扩展**：batch 加了 9 个新 op——polygon collider2d + 8 个 joint2d + `add_audio_source`——以前的"rigid body + collider + joint"10 个独立调用压到 1 个 batch。
+
+### 场景读 LRU(8) + mtime 失效
+
+**动机**：batch_ops 之外，连续多次独立 tool 调用（比如 agent 一个个 set_node_position）仍然每次 parse JSON。
+
+**实现**：`cocos/scene_builder/_helpers.py::_load_scene` 走 `functools.lru_cache(8)`，key 是 `(abs_path, st_mtime_ns)`。外部进程写盘 → mtime 变 → 下次读自动 miss。
+
+**容量 8**：覆盖 typical 工作流里同时开的 scene + 几个 prefab；再多会驱逐，但驱逐是 LRU，最近一次 batch 里摸过的文件一定在缓存。
+
+### 构建后补丁为什么独立于 Creator build hooks
+
+Creator 有 `onAfterBuild` 官方钩子，但：
+
+- 要在 `package.json` 里配 `contributions.builder`，项目侵入性强
+- 钩子只能 Creator 开着才跑，CI 里不行
+- 每个 hook 是一个 TypeScript 文件，agent 写起来麻烦
+
+**我们的方案**：`register_post_build_patch(patches=[...])` 把补丁声明**落 JSON** 到 `settings/v2/packages/post-build-patches.json`，跟着 git 走。`cocos_build` 成功后 Python 这边自动扫这个 JSON 跑补丁。
+
+三种 patch 类型：
+- `json_set` —— 精准 key 覆盖（典型场景：wechat appid 被刷掉）
+- `regex_sub` —— 正则替换（style.css 主题色）
+- `copy_from` —— 整文件覆盖（自定义 index.html）
+
+**安全阀**：regex 注册时预编译 + 路径注入防御（拒绝 `..` / 绝对路径）+ drift 保护（正则不匹配直接报错，不静默跳过）+ `dry_run` 预检 + 首个 patch 失败 **止损**（不连锁）。
+
+### 结构化错误 + TS 诊断结构化
+
+**动机**：AI 读构建日志尾部非常蠢且不可靠。构建失败原因（typescript 错 / missing module / asset not found / timeout）应该结构化返回。
+
+**实现**：
+- `cocos_build` 返回 `{ok: False, error_code: "BUILD_TYPESCRIPT_ERROR", hint: "...", ts_errors: [{file, line, col, code, message}]}`
+- 9 种 error_code，每种带 hint 告诉 AI 下一步该调什么工具
+- TS 错误用正则从构建日志提取，agent 直接 Read + Edit 目标文件定位
+
+**配套**：`cocos_audit_scene_modules` 返回 `actions: [cocos_set_engine_module(...), cocos_clean_project(...)]` **可复制粘贴的命令链**，agent 不用思考。
+
+### TypedDict 契约漂移检测
+
+**动机**：工具返回值的字段（比如 `BuildResult.error_code`）被意外改名 / 删除时，调用方沉默接受，一直用到运行时才炸。
+
+**实现**：`cocos/types.py` 里 8 个 TypedDict（`BuildResult` / `ValidationResult` / `BatchOpsResult` / ...）。`tests/test_types.py` 用反射比对 `TypedDict.__annotations__` 和真实返回值的 keys。漏字段 / 多字段 / 改名都直接测试失败。
+
+### 脚手架为什么生成 TS 源码而不是内置组件
+
+**选择**：6 个 `scaffold_*` 工具生成 canonical `.ts` 模板写到用户项目里，返回压缩 UUID，不是 built-in 运行时组件。
+
+**原因**：
+1. **用户可改**：生成后是普通 `.ts`，用户的游戏逻辑调整不会受 cocos-mcp 版本束缚
+2. **可读**：Inspector 可调（`@property` + `{ tooltip }` 注解），不是黑箱
+3. **版本解耦**：cocos-mcp 升级不会 break 用户已生成的脚本
+4. **跨项目可移植**：generated .ts 可以被 copy 到不走 MCP 的项目
+
+**代价**：每个游戏项目里堆一份脚本，占几 KB；但对游戏项目这点 overhead 可忽略。
+
+### 脚手架 kinds 枚举
+
+- `player_controller`：4 种（platformer / topdown / flappy / click_only）
+- `enemy_ai`：3 种（patrol / chase / shoot）
+- `spawner`：2 种（time 定时 / proximity 靠近触发）
+- `game_loop`：state 机（menu / play / over，每 state 两个 Inspector 回调）
+- `input`：WASD + 方向键 + 触屏统一成 InputManager 单例
+- `score`：当前 + 最高 + localStorage + 可选 Label 自动渲染
+
+**单例安全**：InputManager null 安全——玩家脚本 null-check 它不存在也不 crash。agent 可以按任意顺序挂载脚本。
+
+### UI 模式预设 + 响应式助手 + 主题
+
+**UI 模式预设**（6 个）：`add_dialog_modal` / `add_main_menu` / `add_hud_bar` / `add_card_grid` / `add_toast` / `add_loading_spinner`。Agent 一次搭完整 UI 块，不用 6-8 步堆节点+Layout。
+
+**响应式助手**（5 个）：`make_fullscreen` / `anchor_to_edge` / `center_in_parent` / `stack_vertically` / `stack_horizontally`。告别手填 Widget bitmask（12 种 flag 组合）。
+
+**UI token 系统**（5 内置主题）：dark_game / light_minimal / neon_arcade / pastel_cozy / corporate。主题切换 = 一个 `set_ui_theme`，scene 里所有 token-aware 组件更新颜色 + 字号。
+
+**UI lint**（8 条规则）：touch target 48×48 / 长文本剪字 / UI layer 错置 / WCAG 对比度 / 按钮重叠 / 字号框爆边 / 多按钮无 Layout / 嵌套 Mask。
+
+---
+
+## 🏭 商业化决策
+
+### 从 MIT 转闭源（v1.2-dev 起）
+
+**决策**：≤v1.1.0 是 MIT，v1.2-dev 起 Proprietary。
+
+**原因**：
+- MCP 生态 2025-2026 爆发式增长（官方 registry 破 1200 servers，8M downloads / MoM 85%），但 **<5% 的 MCP 做了付费**——像 App Store 早期
+- 游戏引擎 MCP 赛道独立开发者仍有商业化窗口（Unity MCP 5.8k stars、Unreal MCP 1.2k stars、Cocos **零竞品**）
+- cocos-mcp 的护城河不是源码，是"**对齐 Cocos 3.8 + 184 工具 + 字段漂移持续对齐**"，闭源更多是法律层面防无授权商业复用
+
+**执行**：
+- 旧 MIT 分发已停止；LICENSE 文件更新为 Proprietary 声明
+- README 顶部 CTA：`📧 2282059276@qq.com`
+
+### 发布走 Gitee Releases 而不是 PyPI
+
+**决策**：不上 PyPI；分发方式是 Nuitka 编二进制 → GitHub / Gitee Releases。
+
+**原因**：
+- **PyPI 跟真闭源不兼容**：哪怕上 Nuitka wheel，PyPI 定位是开放包分发，闭源心智不匹配
+- **Gitee Releases 对国内用户友好**：npm.org / PyPI 在国内企业网常被 block，Gitee 不会
+- **Two-Repo 模式**：私有源码仓 + 公开发布门面仓（只有 README + Releases 挂二进制）
+- **控制力**：版本能瞬间下架 / 加 EULA 点击同意 / 加 license key 校验
+
+**对比 npm 路线**：npm + Nuitka + optionalDependencies 工程量 3-5 天；GitHub/Gitee Releases 工程量 1-2 天；后者对这个项目性价比更高。
+
+### 双语文档（中文主版本 + 英文对照）
+
+**决策**：所有文档都是 `FOO.md`（中文）+ `FOO.en.md`（英文）双版本。
+
+**原因**：
+- 目标用户一半在国内，中文是母语
+- MCP 国际 registry / awesome-mcp / Smithery / MCPMarket 需要英文
+- 中文为主保持作者维护效率；英文对照支持海外传播
+
+---
+
+## 📂 项目结构演化
+
+### `server.py` 瘦身
+
+历史：`server.py` 曾是 1200 行的 `@mcp.tool()` 大杂烩。
+
+现在：60 行 = `FastMCP("cocos-mcp")` + `tools.register_all(mcp)`。所有工具在 `cocos/tools/<concern>.py` 下分 10 个模块：
+
+```
+cocos/tools/
+├── core.py                 # UUID / project / asset / 常量 / UI token
+├── scene.py                # scene / node / 基础组件 / 光照 / fog / prefab / batch / lint
+├── physics_ui.py           # 2D 物理 + UI 组件
+├── physics_3d.py           # 3D 物理
+├── rendering_3d.py         # 3D 光源 + MeshRenderer
+├── media.py                # audio / anim / particle / Spine / DB / TiledMap / VideoPlayer
+├── ui_patterns.py          # UI 模式 + 响应式 + styled_text + 动画预设
+├── interact.py             # Playwright 闭环反馈
+├── scaffolds.py            # 6 个脚手架工具
+├── composites.py           # 复合工具（add_physics_body2d / add_button_with_label）
+└── build.py                # 构建 / 预览 / 发布配置 / 构建后补丁
+```
+
+按 **concern**（关注点）分，不是按 type（组件 / 资源）分——让相关工具挤在一起方便 grep 和理解。
+
+### `scene_builder/` 按域拆分
+
+`scene_builder/` 下也按 concern 拆：`physics.py` / `physics_3d.py` / `ui.py` / `ui_patterns.py` / `ui_lint.py` / `responsive.py` / `animation_presets.py` / `rendering.py` / `media.py` / `prefab.py` / `batch.py` / `modules.py`。
+
+`__init__.py` 只做 re-export + 核心 scene 生命周期 + 基础 node / 组件工厂。
+
+---
+
+## 🚨 兼容性与未来方向
+
+### 硬要求
+
+- **Python 3.11+**（用到了 `Self` / `TypeAlias` / `match`）
+- **Cocos Creator 3.8+**（测试过 3.8.6；<3.8 字段漂移不同不支持）
+- **Pillow lazy-import**：不触发图片操作的工具不装 Pillow 也能跑（slim 环境 CI 友好）
+- **Playwright 可选**：~200 MB chromium，不装时 Playwright 工具返回明确的 install hint；视觉 diff 走纯 Pillow，不依赖 Playwright
+
+### 短期跟进（需要时做）
+
+- `@cocos/ccbuild` + Nuitka 打包 → GitHub/Gitee Releases
+- 英文文档的 awesome-mcp / Smithery / MCPMarket 提交
+- code signing（macOS $99/year + Windows EV cert）
+- 首次使用的交互引导（Claude Desktop / Cursor 的一键安装 badge）
+
+### 明确不做的（曾考虑但放弃）
+
+- **Route D（完全不依赖 Creator 构建）**：理论可行（引擎 bundle 里已有 `deserializeDynamic` 能读编辑器格式 JSON），但要重编引擎带 `BUILD=false` + 自研 SpriteFrame/Texture2D 编辑器格式生成器，每次 Cocos 升级都要重新对齐。**维护成本不值**——"对齐 Creator 一步"比"对齐整个 Creator build pipeline"简单一个量级。
+- **Route C（改 Creator 官方 builder ccbuild）**：同上，cocos/cocos-engine 里 `editor-extends/utils/serialize/` 是 Creator 专利闭源代码（`.ccc` 加密，不在 `cocos-engine` 开源仓库）。绕过的收益不够。
+
+---
+
+## 📌 版本节点简表
+
+| 版本 | 日期 | 主要变化 |
+|---|---|---|
+| ≤v1.1.0 | 2024 | MIT 开源；80 工具；45 测试；基础工具齐全 |
+| v1.2-dev | 2026 | 闭源启动；184 工具；741 测试；dogfood v1+v2 反馈全量修复；3D 物理+渲染齐全；UI 模式预设 + 脚手架；Playwright 闭环反馈；构建后补丁 |
+
+详细 per-release changelog 见 [DESIGN_NOTES.en.md](./DESIGN_NOTES.en.md)。
