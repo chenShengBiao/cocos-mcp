@@ -523,13 +523,20 @@ def register(mcp: FastMCP) -> None:
         all the ops in one call; use ``"$N"`` back-references for ids that
         earlier ops produced.
 
-        Each operation is a dict with an 'op' key and operation-specific
-        params. Returns {object_count, ops_executed, results: [...]}.
+        Each operation is a dict with an ``op`` key and operation-specific
+        params. Returns ``{object_count, ops_executed, results, named_results}``:
+
+        * ``results`` is the positional list (preserved for callers that
+          use ``"$N"`` index back-refs).
+        * ``named_results`` is a dict keyed by the ``name`` field set on
+          any op — ops without ``name`` don't contribute. Let's you use
+          ``"$bird"`` instead of ``"$0"`` which stays stable across edits.
 
         Supported ops:
           Structural:
             - {"op": "add_node", "parent_id": N, "name": "...", "pos_x": ..., ...}
             - {"op": "attach_script", "node_id": N, "script_uuid_compressed": "...", "props": {...}}
+              (36-char standard UUIDs auto-compressed, matching cocos_add_script.)
             - {"op": "link_property", "component_id": N, "prop_name": "...", "target_id": M}
             - {"op": "set_property", "object_id": N, "prop_name": "...", "value": ...}
             - {"op": "set_uuid_property", "object_id": N, "prop_name": "...", "uuid": "..."}
@@ -556,11 +563,30 @@ def register(mcp: FastMCP) -> None:
             - {"op": "add_rigidbody2d", "node_id": N, "body_type": 2, ...}
             - {"op": "add_box_collider2d", "node_id": N, "width": W, ...}
             - {"op": "add_circle_collider2d", "node_id": N, "radius": R, ...}
+            - {"op": "add_polygon_collider2d", "node_id": N, "points": [[x,y], ...], ...}
             - {"op": "add_component", "node_id": N, "type_name": "cc.X", "props": {...}}
 
-        Node/component IDs returned by prior ops can be referenced as "$N"
-        where N is the 0-based op index. Example:
-          [{"op": "add_node", "parent_id": 2, "name": "Bird"},
-           {"op": "add_uitransform", "node_id": "$0", "width": 50, "height": 50}]
+          Physics 2D joints (Cocos 3.8 has eight — all present):
+            - {"op": "add_distance_joint2d", "node_id": N, "connected_body_id": M?, "distance": 100, ...}
+            - {"op": "add_hinge_joint2d", "node_id": N, "enable_motor": true, "motor_speed": 50, ...}
+            - {"op": "add_spring_joint2d", "node_id": N, "frequency": 5, "damping_ratio": 0.7, ...}
+            - {"op": "add_mouse_joint2d", "node_id": N, "max_force": 1000, "target_x": ..., "target_y": ...}
+            - {"op": "add_slider_joint2d", "node_id": N, "angle": 0, "enable_motor": true, ...}
+            - {"op": "add_wheel_joint2d", "node_id": N, "angle": 90, ...}
+            - {"op": "add_fixed_joint_2d", "node_id": N, "angle": 0, ...}
+              (cc.FixedJoint2D — previously mis-named "weld"; 3.8 renames it.)
+            - {"op": "add_relative_joint2d", "node_id": N, "linear_offset_x": 10, ...}
+
+        Back-reference forms inside any op value:
+          * ``"$N"``       — positional id of op index N (0-based).
+          * ``"$name"``    — named id, resolves against prior ops'
+                             ``name`` field.
+
+        Example mixing both forms::
+
+          [{"op": "add_node", "parent_id": 2, "name": "bird"},          # $0 or $bird
+           {"op": "add_uitransform", "node_id": "$bird", "width": 50, "height": 50},
+           {"op": "add_rigidbody2d",  "node_id": "$bird", "body_type": 2},
+           {"op": "add_circle_collider2d", "node_id": "$bird", "radius": 25}]
         """
         return sb.batch_ops(scene_path, operations)

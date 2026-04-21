@@ -6,7 +6,51 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Total: **180 tools** (was 80) · **688 tests** (was 45) · **0 mypy / ruff errors**.
+Total: **183 tools** (was 80) · **707 tests** (was 45) · **0 mypy / ruff errors**.
+
+### Added — Batch-op extensions + 2 composites + introspection (180 → 183 tools)
+
+Second pass on dogfood recommendations, focused on the "still 3-6 calls
+per composite action" complaint agents had even post-Bug-A/B. Details:
+
+- **`cocos_batch_scene_ops` gains 9 new op kinds**:
+  - ``add_polygon_collider2d`` — vertex-list collider for non-rect shapes.
+  - All eight ``cc.*Joint2D`` variants (distance / hinge / spring / mouse
+    / slider / wheel / fixed / relative). Dogfood's 10-individual-call
+    rigidbody-collider-joint trio now folds into one batch. Every joint
+    supports the full param surface the direct tools accept.
+  - ``attach_script`` inside batch auto-compresses 36-char standard UUIDs
+    to match the direct ``scene_builder.add_script`` behavior — closes
+    a silent-no-op trap (previously a standard UUID as ``__type__``
+    produced an unresolved component).
+- **Name-addressable batch results**: an op can set ``"name": "bird"``
+  and later ops reference it as ``"$bird"`` instead of ``"$0"``.
+  Resolution is name-first in a ``named_results: dict`` on the
+  response; positional ``$N`` still works unchanged. Unknown ``$name``
+  falls through as a literal so the downstream op errors clearly
+  rather than silently substituting the wrong id.
+- **``cocos_add_physics_body2d``** (composite): RigidBody2D + a shape
+  collider (box / circle / polygon) in one call. Returns
+  ``{rigidbody_id, collider_id, shape}``. Every Bird / Pipe / Ground
+  / Enemy in the dogfood ran this 2-call sequence — now it's one.
+  Unknown ``shape`` raises rather than silently defaulting.
+- **``cocos_add_button_with_label``** (composite): creates the canonical
+  ``Btn (Node + UITransform + optional Sprite + Button) → Label (Node
+  + UITransform + Label)`` subtree in one call. Every menu button in
+  the dogfood ran 7 separate calls for this; now it's one. Accepts
+  design-token presets, optional sprite-frame background, and
+  ``click_events`` forwarded to ``add_button`` verbatim.
+- **``cocos_list_tools``** (introspection): returns the actual tool
+  surface the server registered. Solves the "stale MCP catalog"
+  issue the dogfood run hit (Bug C in the report) — subagents'
+  deferred-tool search occasionally couldn't see tools added after
+  their session started. Supports ``name_contains`` substring and
+  ``category`` bucket filters (heuristic mapping over 16 buckets:
+  ``uuid`` / ``project`` / ``asset`` / ``scene`` / ``physics2d`` /
+  ``physics3d`` / ``rendering`` / ``ui`` / ``media`` / ``build`` /
+  ``interact`` / ``scaffold`` / ``composite`` / ``meta``). Zero
+  tools fall into ``"other"`` — that's tested as a regression guard
+  so new tools without a rule get surfaced.
 
 ### Fixed — Dogfood-Flappy HIGH-ROI bugs (Bug A + Bug B)
 

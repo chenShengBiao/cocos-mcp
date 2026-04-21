@@ -11,6 +11,170 @@ if TYPE_CHECKING:  # pragma: no cover
     from mcp.server.fastmcp import FastMCP
 
 
+# Substring → category. Checked in order; first hit wins. Keep the
+# specific matches (scaffold, composite, interact) above the generic
+# ones (add_, set_) since those are less discriminating.
+_CATEGORY_RULES: tuple[tuple[str, str], ...] = (
+    ("scaffold", "scaffold"),
+    ("composite_", "composite"),
+    ("and_attach", "composite"),
+    ("with_label", "composite"),
+    ("physics_body2d", "composite"),
+    ("uuid", "uuid"),
+    ("init_project", "project"),
+    ("list_creator", "project"),
+    ("get_project_info", "project"),
+    ("project_info", "project"),
+    ("clean_project", "project"),
+    ("list_assets", "asset"),
+    ("add_script", "asset"),
+    ("add_image", "asset"),
+    ("add_audio_file", "asset"),
+    ("add_resource_file", "asset"),
+    ("sprite_frame", "asset"),
+    ("sprite_atlas", "asset"),
+    ("animation_clip", "asset"),
+    ("upgrade_image", "asset"),
+    ("generate_asset", "asset"),
+    ("rigidbody_3d", "physics3d"),
+    ("collider_3d", "physics3d"),
+    ("character_controller", "physics3d"),
+    ("physics_3d", "physics3d"),
+    ("physics_material", "physics3d"),
+    ("rigidbody2d", "physics2d"),
+    ("collider2d", "physics2d"),
+    ("joint2d", "physics2d"),
+    ("joint_2d", "physics2d"),
+    ("physics_2d", "physics2d"),
+    ("directional_light", "rendering"),
+    ("sphere_light", "rendering"),
+    ("spot_light", "rendering"),
+    ("mesh_renderer", "rendering"),
+    ("set_ambient", "rendering"),
+    ("set_skybox", "rendering"),
+    ("set_shadows", "rendering"),
+    ("set_fog", "rendering"),
+    ("add_button", "ui"),
+    ("add_label", "ui"),
+    ("add_sprite", "ui"),
+    ("add_richtext", "ui"),
+    ("add_layout", "ui"),
+    ("add_progress_bar", "ui"),
+    ("add_scroll", "ui"),
+    ("add_slider", "ui"),
+    ("add_toggle", "ui"),
+    ("add_editbox", "ui"),
+    ("add_page", "ui"),
+    ("add_mask", "ui"),
+    ("add_ui_opacity", "ui"),
+    ("add_widget", "ui"),
+    ("add_safe_area", "ui"),
+    ("add_webview", "ui"),
+    ("add_motion_streak", "ui"),
+    ("add_graphics", "ui"),
+    ("add_block_input", "ui"),
+    ("add_filled_sprite", "ui"),
+    ("add_sliced_sprite", "ui"),
+    ("ui_theme", "ui"),
+    ("ui_tokens", "ui"),
+    ("ui_lint", "ui"),
+    ("lint_ui", "ui"),
+    ("theme_from_seed", "ui"),
+    ("hex_to_rgba", "ui"),
+    ("builtin_themes", "ui"),
+    ("styled_text", "ui"),
+    ("responsive", "ui"),
+    ("anchor_to_edge", "ui"),
+    ("center_in_parent", "ui"),
+    ("make_fullscreen", "ui"),
+    ("stack_horizontally", "ui"),
+    ("stack_vertically", "ui"),
+    ("add_bounce_in", "ui"),
+    ("add_fade_in", "ui"),
+    ("add_pulse", "ui"),
+    ("add_scale_in", "ui"),
+    ("add_shake", "ui"),
+    ("add_slide_in", "ui"),
+    ("card_grid", "ui"),
+    ("main_menu", "ui"),
+    ("dialog_modal", "ui"),
+    ("hud_bar", "ui"),
+    ("loading_spinner", "ui"),
+    ("toast", "ui"),
+    ("audit_scene_modules", "scene"),
+    ("add_audio_source", "media"),
+    ("add_animation", "media"),
+    ("add_video", "media"),
+    ("add_particle", "media"),
+    ("add_spine", "media"),
+    ("add_dragonbones", "media"),
+    ("add_tiled", "media"),
+    ("tiled_map", "media"),
+    ("dragonbones_data", "media"),
+    ("spine_data", "media"),
+    ("build", "build"),
+    ("preview", "interact"),
+    ("post_build", "build"),
+    ("native_build", "build"),
+    ("bundle_config", "build"),
+    ("wechat", "build"),
+    ("engine_module", "build"),
+    ("start_scene", "build"),
+    ("add_scene_to_build", "build"),
+    ("run_preview_sequence", "interact"),
+    ("assert_", "interact"),
+    ("preview_screenshot", "interact"),
+    ("preview_click", "interact"),
+    ("preview_key", "interact"),
+    ("preview_type", "interact"),
+    ("preview_drag", "interact"),
+    ("preview_read", "interact"),
+    ("screenshot_diff", "interact"),
+    ("create_scene", "scene"),
+    ("create_prefab", "scene"),
+    ("save_subtree", "scene"),
+    ("instantiate_prefab", "scene"),
+    ("create_node", "scene"),
+    ("add_node", "scene"),
+    ("delete_node", "scene"),
+    ("duplicate_node", "scene"),
+    ("move_node", "scene"),
+    ("find_node", "scene"),
+    ("list_scene_nodes", "scene"),
+    ("set_node", "scene"),
+    ("validate_scene", "scene"),
+    ("batch_scene", "scene"),
+    ("link_property", "scene"),
+    ("set_property", "scene"),
+    ("set_uuid_property", "scene"),
+    ("attach_script", "scene"),
+    ("add_component", "scene"),
+    ("add_uitransform", "scene"),
+    ("add_camera", "scene"),
+    ("get_object", "scene"),
+    ("make_click_event", "scene"),
+    ("make_event_handler", "scene"),
+    ("design_resolution", "build"),
+    ("list_tools", "meta"),
+    ("constants", "meta"),
+)
+
+
+def _infer_category(tool_name: str) -> str:
+    """Heuristic mapping from tool name → coarse category.
+
+    Precedence follows the declaration order in ``_CATEGORY_RULES``;
+    the first matching substring wins. Anything that doesn't match
+    falls into ``"other"`` — visible in ``cocos_list_tools`` output
+    so we can notice and add a rule.
+    """
+    lower = tool_name.lower()
+    for needle, cat in _CATEGORY_RULES:
+        if needle in lower:
+            return cat
+    return "other"
+
+
 def register(mcp: FastMCP) -> None:
     # ---------------- UUID utilities ----------------
 
@@ -135,6 +299,68 @@ def register(mcp: FastMCP) -> None:
         (run `cocos_upgrade_image_meta` first if it's still texture-only).
         """
         return mu.set_sprite_frame_border(meta_path, top, bottom, left, right)
+
+    # ---------------- Introspection: registered tool set ----------------
+
+    @mcp.tool()
+    def cocos_list_tools(name_contains: str | None = None,
+                         category: str | None = None) -> dict:
+        """List the tools actually registered on this MCP server.
+
+        Solves the stale-catalog problem the dogfood run ran into: a
+        subagent's MCP session can't reliably see tools registered
+        after the session started, so asking the server directly is
+        the ground truth. Returns ``{count, tools: [{name, category,
+        summary}, ...]}`` where ``summary`` is the first non-empty
+        line of the docstring.
+
+        Filters (all optional):
+
+        * ``name_contains`` — case-insensitive substring on the tool
+          name. Pass ``"joint"`` to list every Joint2D helper,
+          ``"scaffold"`` for the 9 gameplay scaffolds.
+        * ``category`` — coarse bucket inferred from the name prefix:
+          ``uuid`` / ``project`` / ``asset`` / ``scene`` / ``physics2d`` /
+          ``physics3d`` / ``rendering`` / ``ui`` / ``media`` /
+          ``build`` / ``interact`` / ``scaffold`` / ``composite`` /
+          ``meta`` / ``other``. Inference is heuristic — a tool
+          shows up in exactly one bucket.
+
+        Empty filters return every tool. Use this whenever you need to
+        double-check whether a capability is already baked in before
+        implementing it manually.
+        """
+        needle = (name_contains or "").lower()
+        want = (category or "").lower()
+        items: list[dict] = []
+        # _tool_manager is FastMCP's private but stable registry; the
+        # public list_tools() is async and can't be awaited cleanly
+        # from a sync @mcp.tool(). If FastMCP ever renames this we'll
+        # need to update, but the breakage is localized.
+        for tool in mcp._tool_manager.list_tools():
+            name = tool.name
+            if needle and needle not in name.lower():
+                continue
+            cat = _infer_category(name)
+            if want and cat != want:
+                continue
+            desc = (tool.description or "").strip()
+            summary = ""
+            for line in desc.splitlines():
+                line = line.strip()
+                if line:
+                    summary = line
+                    break
+            items.append({
+                "name": name,
+                "category": cat,
+                "summary": summary[:160],  # cap so the response stays readable
+            })
+        items.sort(key=lambda t: (t["category"], t["name"]))
+        return {
+            "count": len(items),
+            "tools": items,
+        }
 
     # ---------------- Constants reference table ----------------
 

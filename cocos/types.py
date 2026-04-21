@@ -118,10 +118,17 @@ class BatchOpsResult(TypedDict):
     ``results`` is a heterogeneous list: each element is an int (new
     node/component id), True (set_* success), or an ``{"error": "..."}``
     dict when an individual op failed.
+
+    ``named_results`` surfaces the same values keyed by the ``name`` field
+    an op opted into — e.g. ``{"op": "add_node", "name": "bird", ...}`` puts
+    the new node id under ``named_results["bird"]``. Ops without a ``name``
+    don't contribute. Agents building 10+ op batches use this to refer back
+    to siblings by label instead of juggling positional ``$N`` indices.
     """
     object_count: int
     ops_executed: int
     results: list
+    named_results: dict[str, object]
 
 
 # ---------- structured error envelope ----------

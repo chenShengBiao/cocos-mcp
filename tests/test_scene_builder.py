@@ -243,6 +243,180 @@ class TestBatchOps:
         assert data[rb_id]["__type__"] == "cc.RigidBody2D"
         assert data[col_id]["__type__"] == "cc.BoxCollider2D"
 
+    def test_polygon_collider2d_default_points(self):
+        """Batch add_polygon_collider2d mirrors the direct version —
+        default to a 100×100 square when points aren't specified."""
+        path, info = _tmp_scene()
+        result = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "P"},
+            {"op": "add_rigidbody2d", "node_id": "$0"},
+            {"op": "add_polygon_collider2d", "node_id": "$0"},
+        ])
+        col_id = result["results"][2]
+        with open(path) as f:
+            data = json.load(f)
+        col = data[col_id]
+        assert col["__type__"] == "cc.PolygonCollider2D"
+        assert col["_points"] == [[-50, -50], [50, -50], [50, 50], [-50, 50]]
+
+    def test_polygon_collider2d_explicit_points(self):
+        """Triangle polygon with explicit vertex list."""
+        path, info = _tmp_scene()
+        tri = [[0, 50], [-50, -50], [50, -50]]
+        result = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "T"},
+            {"op": "add_rigidbody2d", "node_id": "$0"},
+            {"op": "add_polygon_collider2d", "node_id": "$0",
+             "points": tri, "friction": 0.8, "density": 2.5, "is_sensor": True},
+        ])
+        col_id = result["results"][2]
+        with open(path) as f:
+            data = json.load(f)
+        col = data[col_id]
+        assert col["_points"] == tri
+        assert col["_friction"] == 0.8
+        assert col["_density"] == 2.5
+        assert col["_sensor"] is True
+
+    def test_all_eight_joints_attach(self):
+        """Exercise every Joint2D variant in one batch — regression
+        guard that ensures none are silently broken. Two RigidBody2D
+        nodes give the joints something to connect to."""
+        path, info = _tmp_scene()
+        result = batch_ops(path, [
+            # Two bodies: bodyA and bodyB.
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "A"},
+            {"op": "add_rigidbody2d", "node_id": "$0"},
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "B"},
+            {"op": "add_rigidbody2d", "node_id": "$2"},
+            # The 8 joints, each attached to A and referencing B as the
+            # connected body (except MouseJoint, which ignores it).
+            {"op": "add_distance_joint2d", "node_id": "$0", "connected_body_id": "$3",
+             "distance": 150.0, "auto_calc_distance": False},
+            {"op": "add_hinge_joint2d", "node_id": "$0", "connected_body_id": "$3",
+             "enable_motor": True, "motor_speed": 45.0},
+            {"op": "add_spring_joint2d", "node_id": "$0", "connected_body_id": "$3",
+             "frequency": 4.0, "damping_ratio": 0.5},
+            {"op": "add_mouse_joint2d", "node_id": "$0", "max_force": 800.0,
+             "target_x": 100, "target_y": 50},
+            {"op": "add_slider_joint2d", "node_id": "$0", "connected_body_id": "$3",
+             "angle": 30.0, "enable_limit": True, "upper_limit": 60.0},
+            {"op": "add_wheel_joint2d", "node_id": "$0", "connected_body_id": "$3",
+             "angle": 90.0, "enable_motor": True},
+            {"op": "add_fixed_joint_2d", "node_id": "$0", "connected_body_id": "$3",
+             "frequency": 6.0},
+            {"op": "add_relative_joint2d", "node_id": "$0", "connected_body_id": "$3",
+             "linear_offset_x": 25.0, "angular_offset": 10.0},
+        ])
+        # All 8 joint ops must return an int cid (not an error dict).
+        joint_cids = result["results"][4:12]
+        assert all(isinstance(c, int) for c in joint_cids), \
+            f"expected 8 ints, got {[type(c).__name__ for c in joint_cids]}"
+        # Inspect each resulting component carries the right __type__.
+        with open(path) as f:
+            data = json.load(f)
+        expected = [
+            "cc.DistanceJoint2D", "cc.HingeJoint2D", "cc.SpringJoint2D",
+            "cc.MouseJoint2D", "cc.SliderJoint2D", "cc.WheelJoint2D",
+            "cc.FixedJoint2D", "cc.RelativeJoint2D",
+        ]
+        assert [data[cid]["__type__"] for cid in joint_cids] == expected
+        # DistanceJoint2D specifically passes through configuration.
+        dj = data[joint_cids[0]]
+        assert dj["_distance"] == 150.0
+        assert dj["_autoCalcDistance"] is False
+        # HingeJoint2D motor enabled.
+        hj = data[joint_cids[1]]
+        assert hj["_enableMotor"] is True
+        assert hj["_motorSpeed"] == 45.0
+
+    def test_joint_without_connected_body(self):
+        """connected_body_id is optional — None means anchor to world."""
+        path, info = _tmp_scene()
+        result = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "Solo"},
+            {"op": "add_rigidbody2d", "node_id": "$0"},
+            {"op": "add_distance_joint2d", "node_id": "$0", "distance": 50.0},
+        ])
+        cid = result["results"][2]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[cid]["_connectedBody"] is None
+
+    # ------- named back-references + named_results -------
+
+    def test_named_back_reference(self):
+        """"$name" resolves against prior ops' ``name`` field, stable
+        across reordering/edits. Reads cleaner in 10+ op batches where
+        agents were juggling positional $N indices."""
+        path, info = _tmp_scene()
+        result = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "bird"},
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "enemy"},
+            {"op": "add_uitransform", "node_id": "$bird", "width": 40, "height": 40},
+            {"op": "add_uitransform", "node_id": "$enemy", "width": 80, "height": 80},
+        ])
+        # named_results maps name -> result; positional still works.
+        assert "bird" in result["named_results"]
+        assert "enemy" in result["named_results"]
+        assert result["named_results"]["bird"] == result["results"][0]
+        assert result["named_results"]["enemy"] == result["results"][1]
+        # The UITransform ops got the right widths because the refs resolved.
+        bird_uit_id = result["results"][2]
+        enemy_uit_id = result["results"][3]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[bird_uit_id]["_contentSize"]["width"] == 40
+        assert data[enemy_uit_id]["_contentSize"]["width"] == 80
+
+    def test_named_results_preserves_positional_compat(self):
+        """Ops without a ``name`` don't contaminate named_results —
+        positional $N still resolves them identically to before."""
+        path, info = _tmp_scene()
+        result = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "hero"},
+            {"op": "add_node", "parent_id": info["canvas_node_id"]},  # anonymous
+            {"op": "add_uitransform", "node_id": "$1"},                # positional
+        ])
+        assert list(result["named_results"].keys()) == ["hero"]
+        # $1 (the anonymous node) still resolved — its UITransform got attached.
+        uit_id = result["results"][2]
+        with open(path) as f:
+            data = json.load(f)
+        assert data[uit_id]["__type__"] == "cc.UITransform"
+
+    def test_unknown_named_ref_falls_through(self):
+        """Unknown ``$name`` stays as a literal string so downstream op
+        raises a clear type error — better than a silent wrong id."""
+        path, info = _tmp_scene()
+        result = batch_ops(path, [
+            {"op": "add_uitransform", "node_id": "$nobody", "width": 10, "height": 10},
+        ])
+        # Op must have errored (since node_id should be int, got str).
+        first = result["results"][0]
+        assert isinstance(first, dict)
+        assert "error" in first
+
+    def test_attach_script_auto_compresses_in_batch(self):
+        """Passing the 36-char standard UUID to batch attach_script now
+        auto-compresses like the direct scene_builder.add_script. Regression:
+        previously the batch path silently took the standard form and
+        produced a no-op component."""
+        path, info = _tmp_scene()
+        standard_uuid = "12345678-1234-1234-1234-123456789abc"
+        result = batch_ops(path, [
+            {"op": "add_node", "parent_id": info["canvas_node_id"], "name": "X"},
+            {"op": "attach_script", "node_id": "$0",
+             "script_uuid_compressed": standard_uuid},
+        ])
+        cid = result["results"][1]
+        with open(path) as f:
+            data = json.load(f)
+        comp = data[cid]
+        # __type__ must be the 23-char compressed form, not the standard uuid.
+        assert len(comp["__type__"]) == 23
+        assert "-" not in comp["__type__"]
+
 
 class TestValidation:
     def test_valid_scene(self):

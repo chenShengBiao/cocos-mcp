@@ -61,8 +61,13 @@ def _make_generic(nid: int, type_name: str, prefix: str, props: dict) -> dict:
 def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
     """Execute multiple scene operations in one file read/write cycle.
 
-    Supports $N back-references: if an op returns an int (node/component id),
-    later ops can reference it as "$0", "$1", etc.
+    Supports two back-reference forms:
+      * ``"$N"`` — positional: the result of op index N (0-based).
+      * ``"$name"`` — named: the result of any earlier op that set
+        ``"name": "<name>"``. Cleaner for large batches where agents
+        lose track of positional indices. Names are resolved against
+        the ``named_results`` dict built as ops run, so forward
+        references don't resolve (the name must already be bound).
 
     Supported op types:
 
@@ -76,22 +81,42 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
         add_camera, add_mask, add_richtext, add_button, add_layout,
         add_progress_bar, add_audio_source, add_animation,
         add_rigidbody2d, add_box_collider2d, add_circle_collider2d,
-        add_component (generic — pass type_name + props)
+        add_polygon_collider2d, add_component (generic — pass type_name + props)
+
+      Physics joints (Cocos 3.8 — 8 variants):
+        add_distance_joint2d, add_hinge_joint2d, add_spring_joint2d,
+        add_mouse_joint2d, add_slider_joint2d, add_wheel_joint2d,
+        add_fixed_joint_2d, add_relative_joint2d
     """
     s = _load_scene(scene_path)
     is_prefab = str(scene_path).endswith(".prefab")
     results: list[Any] = []
+    named_results: dict[str, Any] = {}
 
     def resolve(val):
-        """Replace "$N" strings with the result of op N."""
-        if isinstance(val, str) and val.startswith("$") and val[1:].isdigit():
-            idx = int(val[1:])
-            if idx < len(results):
-                return results[idx]
+        """Replace ``"$N"`` / ``"$name"`` strings with prior op results.
+
+        Positional form looks at ``results[N]``; named form looks at
+        ``named_results[name]``. Unknown names fall through unchanged
+        so agents get a clear KeyError at use-site rather than a silent
+        substitution of the literal string.
+        """
+        if isinstance(val, str) and val.startswith("$") and len(val) > 1:
+            key = val[1:]
+            if key.isdigit():
+                idx = int(key)
+                if idx < len(results):
+                    return results[idx]
+            elif key in named_results:
+                return named_results[key]
         return val
 
     def resolve_dict(d: dict) -> dict:
-        return {k: resolve(v) for k, v in d.items()}
+        # ``name`` is the ref key itself and must survive raw — never run
+        # it through resolve() (otherwise ``name: "bird"`` would attempt
+        # to look up ``bird`` before it's bound and fall through, but a
+        # later op with the same literal would reach a shadowed value).
+        return {k: (v if k == "name" else resolve(v)) for k, v in d.items()}
 
     for i, raw_op in enumerate(operations):
         op = resolve_dict(raw_op)
@@ -228,8 +253,16 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
             elif action == "attach_script":
                 nid = op["node_id"]
                 props = op.get("props") or {}  # no auto-wrap, pass as-is
+                # Auto-compress 36-char standard UUIDs. Same contract as
+                # the direct scene_builder.add_script — agents routinely
+                # paste the standard UUID from .ts.meta, and silently
+                # passing it as __type__ would produce a no-op component.
+                script_uuid = op["script_uuid_compressed"]
+                if len(script_uuid) == 36 and script_uuid.count("-") == 4:
+                    from ..uuid_util import compress_uuid
+                    script_uuid = compress_uuid(script_uuid)
                 cid = _attach_component(s, nid, _make_script_component(
-                    op["script_uuid_compressed"], nid, props))
+                    script_uuid, nid, props))
                 results.append(cid)
 
             elif action == "link_property":
@@ -361,8 +394,160 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
                 }))
                 results.append(cid)
 
+            elif action == "add_polygon_collider2d":
+                nid = op["node_id"]
+                pts = op.get("points") or [[-50, -50], [50, -50], [50, 50], [-50, 50]]
+                obj = _make_generic(nid, "cc.PolygonCollider2D", "pc2", {
+                    "tag": op.get("tag", 0),
+                    "_density": op.get("density", 1.0),
+                    "_sensor": op.get("is_sensor", False),
+                    "_friction": op.get("friction", 0.2),
+                    "_restitution": op.get("restitution", 0.0),
+                    "_points": pts,
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            # ---- Joint2D dispatch (Cocos 3.8 — 8 variants) ----
+            # Every joint shares {node, _connectedBody, _collideConnected}
+            # plus type-specific anchor / motor / limit / spring fields.
+            # _joint_base constructs the shared skeleton so each branch
+            # only deals with its own tunables.
+            elif action == "add_distance_joint2d":
+                nid = op["node_id"]
+                obj = _joint_base(nid, "cc.DistanceJoint2D", "dj2", op)
+                obj.update({
+                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                              op.get("connected_anchor_y", 0)),
+                    "_distance": op.get("distance", 1.0),
+                    "_autoCalcDistance": op.get("auto_calc_distance", True),
+                    "_frequency": op.get("frequency", 0.0),
+                    "_dampingRatio": op.get("damping_ratio", 0.0),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            elif action == "add_hinge_joint2d":
+                nid = op["node_id"]
+                obj = _joint_base(nid, "cc.HingeJoint2D", "hj2", op)
+                obj.update({
+                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                              op.get("connected_anchor_y", 0)),
+                    "_enableMotor": op.get("enable_motor", False),
+                    "_motorSpeed": op.get("motor_speed", 0.0),
+                    "_maxMotorTorque": op.get("max_motor_torque", 1000.0),
+                    "_enableLimit": op.get("enable_limit", False),
+                    "_lowerAngle": op.get("lower_angle", 0.0),
+                    "_upperAngle": op.get("upper_angle", 0.0),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            elif action == "add_spring_joint2d":
+                nid = op["node_id"]
+                obj = _joint_base(nid, "cc.SpringJoint2D", "sj2", op)
+                obj.update({
+                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                              op.get("connected_anchor_y", 0)),
+                    "_distance": op.get("distance", 1.0),
+                    "_autoCalcDistance": op.get("auto_calc_distance", True),
+                    "_frequency": op.get("frequency", 5.0),
+                    "_dampingRatio": op.get("damping_ratio", 0.7),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            elif action == "add_mouse_joint2d":
+                # MouseJoint doesn't use connectedBody/collideConnected.
+                nid = op["node_id"]
+                obj = _make_generic(nid, "cc.MouseJoint2D", "mj2", {
+                    "_maxForce": op.get("max_force", 1000.0),
+                    "_frequency": op.get("frequency", 5.0),
+                    "_dampingRatio": op.get("damping_ratio", 0.7),
+                    "_target": _vec2(op.get("target_x", 0), op.get("target_y", 0)),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            elif action == "add_slider_joint2d":
+                nid = op["node_id"]
+                obj = _joint_base(nid, "cc.SliderJoint2D", "sl2", op)
+                obj.update({
+                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                              op.get("connected_anchor_y", 0)),
+                    "_angle": op.get("angle", 0.0),
+                    "_enableMotor": op.get("enable_motor", False),
+                    "_motorSpeed": op.get("motor_speed", 0.0),
+                    "_maxMotorForce": op.get("max_motor_force", 1000.0),
+                    "_enableLimit": op.get("enable_limit", False),
+                    "_lowerLimit": op.get("lower_limit", 0.0),
+                    "_upperLimit": op.get("upper_limit", 0.0),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            elif action == "add_wheel_joint2d":
+                nid = op["node_id"]
+                obj = _joint_base(nid, "cc.WheelJoint2D", "wj2", op)
+                obj.update({
+                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                              op.get("connected_anchor_y", 0)),
+                    "_angle": op.get("angle", 90.0),
+                    "_enableMotor": op.get("enable_motor", False),
+                    "_motorSpeed": op.get("motor_speed", 0.0),
+                    "_maxMotorTorque": op.get("max_motor_torque", 1000.0),
+                    "_frequency": op.get("frequency", 5.0),
+                    "_dampingRatio": op.get("damping_ratio", 0.7),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            elif action == "add_fixed_joint_2d":
+                nid = op["node_id"]
+                obj = _joint_base(nid, "cc.FixedJoint2D", "fj2", op)
+                obj.update({
+                    "_anchor": _vec2(op.get("anchor_x", 0), op.get("anchor_y", 0)),
+                    "_connectedAnchor": _vec2(op.get("connected_anchor_x", 0),
+                                              op.get("connected_anchor_y", 0)),
+                    "_angle": op.get("angle", 0.0),
+                    "_frequency": op.get("frequency", 5.0),
+                    "_dampingRatio": op.get("damping_ratio", 0.7),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
+            elif action == "add_relative_joint2d":
+                nid = op["node_id"]
+                obj = _joint_base(nid, "cc.RelativeJoint2D", "rj2", op)
+                obj.update({
+                    "_maxForce": op.get("max_force", 1000.0),
+                    "_maxTorque": op.get("max_torque", 1000.0),
+                    "_correctionFactor": op.get("correction_factor", 0.3),
+                    "_autoCalcOffset": op.get("auto_calc_offset", True),
+                    "_linearOffset": _vec2(op.get("linear_offset_x", 0),
+                                           op.get("linear_offset_y", 0)),
+                    "_angularOffset": op.get("angular_offset", 0.0),
+                })
+                cid = _attach_component(s, nid, obj)
+                results.append(cid)
+
             else:
                 results.append({"error": f"unknown op: {action}"})
+
+            # Bind the name (if set) AFTER the op succeeded — so a failed
+            # op doesn't leak a broken entry into named_results. We peek
+            # the LAST element of results rather than tracking a separate
+            # variable; works for both success (int) and error (dict) —
+            # the latter is intentionally indexable so a later op can
+            # detect upstream failure if it wants.
+            name = raw_op.get("name")
+            if isinstance(name, str) and name:
+                named_results[name] = results[-1]
 
         except (KeyError, TypeError, ValueError, IndexError) as e:
             # Only swallow errors that plausibly come from malformed op input
@@ -377,4 +562,28 @@ def batch_ops(scene_path: str | Path, operations: list[dict]) -> BatchOpsResult:
         "object_count": len(s),
         "ops_executed": len(operations),
         "results": results,
+        "named_results": named_results,
     }
+
+
+def _joint_base(nid: int, type_name: str, prefix: str, op: dict) -> dict:
+    """Shared skeleton for ``cc.*Joint2D`` ops inside ``batch_ops``.
+
+    Builds the common {node, _connectedBody, _collideConnected, _id}
+    section so each joint branch deals only with its own knobs. Kept at
+    module scope (not inside ``batch_ops``) for performance — no closure
+    rebuild per call.
+    """
+    obj: dict = {
+        "__type__": type_name,
+        "_name": "",
+        "_objFlags": 0,
+        "node": _ref(nid),
+        "_enabled": True,
+        "__prefab": None,
+        "_id": _nid(prefix),
+        "_collideConnected": op.get("collide_connected", False),
+    }
+    cb = op.get("connected_body_id")
+    obj["_connectedBody"] = _ref(cb) if cb is not None else None
+    return obj

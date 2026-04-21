@@ -175,8 +175,8 @@ def test_add_and_attach_script_explicit_uuid_forces_identity(tmp_path: Path):
 
 
 def test_add_and_attach_script_tool_registration():
-    """Sanity: the composite shows up in the MCP tool surface so the
-    agent can actually find it. Regression guard for tools/__init__.py
+    """Sanity: the composites show up in the MCP tool surface so the
+    agent can actually find them. Regression guard for tools/__init__.py
     forgetting to call composites.register."""
     from cocos.tools import composites as tools_composites
     assert hasattr(tools_composites, "register")
@@ -193,4 +193,228 @@ def test_add_and_attach_script_tool_registration():
 
     m = _Mock()
     tools_composites.register(m)
-    assert "cocos_add_and_attach_script" in m.tools
+    for expected in ("cocos_add_and_attach_script",
+                     "cocos_add_physics_body2d",
+                     "cocos_add_button_with_label"):
+        assert expected in m.tools, f"{expected} must be registered"
+
+
+# =============================================================== #
+# add_physics_body2d — RigidBody2D + shape collider in one call
+# =============================================================== #
+
+def test_add_physics_body2d_box_shape(tmp_path: Path):
+    """Box shape produces cc.RigidBody2D + cc.BoxCollider2D wired on
+    the same node, with explicit width/height passed through."""
+    scene, info = _make_scene(tmp_path)
+    node = sb.add_node(scene, info["canvas_node_id"], "Bird")
+
+    r = co.add_physics_body2d(str(scene), node, shape="box",
+                              body_type=2, gravity_scale=1.5,
+                              width=40, height=30, friction=0.1)
+
+    with open(scene) as f:
+        data = json.load(f)
+    assert data[r["rigidbody_id"]]["__type__"] == "cc.RigidBody2D"
+    assert data[r["rigidbody_id"]]["type"] == 2
+    assert data[r["rigidbody_id"]]["gravityScale"] == 1.5
+    assert data[r["collider_id"]]["__type__"] == "cc.BoxCollider2D"
+    # `_size` is stored as a plain [w, h] list via add_box_collider2d's
+    # passthrough (no auto-wrap) — matches the current scene-file shape
+    # Creator accepts.
+    assert data[r["collider_id"]]["_size"] == [40, 30]
+    assert data[r["collider_id"]]["_friction"] == 0.1
+    assert r["shape"] == "box"
+
+
+def test_add_physics_body2d_circle_shape(tmp_path: Path):
+    """Circle shape passes `radius` through, ignores width/height."""
+    scene, info = _make_scene(tmp_path)
+    node = sb.add_node(scene, info["canvas_node_id"], "Ball")
+
+    r = co.add_physics_body2d(str(scene), node, shape="circle",
+                              radius=75, is_sensor=True)
+
+    with open(scene) as f:
+        data = json.load(f)
+    assert data[r["collider_id"]]["__type__"] == "cc.CircleCollider2D"
+    assert data[r["collider_id"]]["_radius"] == 75
+    assert data[r["collider_id"]]["_sensor"] is True
+
+
+def test_add_physics_body2d_polygon_shape(tmp_path: Path):
+    """Polygon shape accepts explicit vertex list."""
+    scene, info = _make_scene(tmp_path)
+    node = sb.add_node(scene, info["canvas_node_id"], "Poly")
+    triangle = [[0, 40], [-40, -40], [40, -40]]
+
+    r = co.add_physics_body2d(str(scene), node, shape="polygon",
+                              points=triangle, density=2.0)
+
+    with open(scene) as f:
+        data = json.load(f)
+    assert data[r["collider_id"]]["__type__"] == "cc.PolygonCollider2D"
+    assert data[r["collider_id"]]["_points"] == triangle
+    assert data[r["collider_id"]]["_density"] == 2.0
+
+
+def test_add_physics_body2d_unknown_shape_raises(tmp_path: Path):
+    """Silent-attach of a default on unknown shape would hide typos —
+    raise explicitly instead."""
+    import pytest
+    scene, info = _make_scene(tmp_path)
+    node = sb.add_node(scene, info["canvas_node_id"], "X")
+    with pytest.raises(ValueError, match="unknown shape"):
+        co.add_physics_body2d(str(scene), node, shape="capsule")
+
+
+# =============================================================== #
+# add_button_with_label — button node + child Label in one call
+# =============================================================== #
+
+def test_add_button_with_label_structure(tmp_path: Path):
+    """Produces the canonical Btn → Label parent/child pair with all
+    four components (UITransform+Button on Btn, UITransform+Label on
+    Label)."""
+    scene, info = _make_scene(tmp_path)
+
+    r = co.add_button_with_label(str(scene), info["canvas_node_id"],
+                                 "Play", width=180, height=54,
+                                 name="PlayBtn", font_size=40)
+
+    with open(scene) as f:
+        data = json.load(f)
+    # Node hierarchy
+    assert data[r["button_node_id"]]["_name"] == "PlayBtn"
+    assert data[r["label_node_id"]]["_name"] == "Label"
+    # Label is a direct child of the button
+    assert data[r["label_node_id"]]["_parent"]["__id__"] == r["button_node_id"]
+    # Components attached
+    assert data[r["button_component_id"]]["__type__"] == "cc.Button"
+    assert data[r["label_component_id"]]["__type__"] == "cc.Label"
+    assert data[r["label_component_id"]]["_string"] == "Play"
+    assert data[r["label_component_id"]]["_fontSize"] == 40
+    # UITransform dimensions match
+    # (Button's UITransform is the first _components entry — attached by add_uitransform.)
+    btn_components = data[r["button_node_id"]]["_components"]
+    btn_uit_id = btn_components[0]["__id__"]
+    assert data[btn_uit_id]["__type__"] == "cc.UITransform"
+    assert data[btn_uit_id]["_contentSize"] == {
+        "__type__": "cc.Size", "width": 180, "height": 54,
+    }
+    # No background sprite when sprite_frame_uuid omitted + no bg preset
+    assert r["sprite_component_id"] is None
+
+
+def test_add_button_with_label_sprite_frame_uuid(tmp_path: Path):
+    """When sprite_frame_uuid is set, a cc.Sprite is attached to the
+    button node with the uuid wired to _spriteFrame."""
+    scene, info = _make_scene(tmp_path)
+
+    r = co.add_button_with_label(str(scene), info["canvas_node_id"],
+                                 "OK", sprite_frame_uuid="xxxxxx@f9941")
+
+    assert r["sprite_component_id"] is not None
+    with open(scene) as f:
+        data = json.load(f)
+    sprite = data[r["sprite_component_id"]]
+    assert sprite["__type__"] == "cc.Sprite"
+    assert sprite["_spriteFrame"] == {"__uuid__": "xxxxxx@f9941"}
+
+
+def test_add_button_with_label_forwards_click_events(tmp_path: Path):
+    """click_events are forwarded to add_button verbatim — each
+    event gets materialized as a separate cc.ClickEvent entry."""
+    scene, info = _make_scene(tmp_path)
+    # Set up a receiver node with a script-component placeholder.
+    # For this test we just need a target node id; make_click_event
+    # accepts any int.
+    target = sb.add_node(scene, info["canvas_node_id"], "GM")
+    evt = sb.make_click_event(target, "GameMgr", "onPlay")
+
+    r = co.add_button_with_label(str(scene), info["canvas_node_id"],
+                                 "Start", click_events=[evt])
+
+    with open(scene) as f:
+        data = json.load(f)
+    btn = data[r["button_component_id"]]
+    assert len(btn["clickEvents"]) == 1
+    evt_obj = data[btn["clickEvents"][0]["__id__"]]
+    assert evt_obj["__type__"] == "cc.ClickEvent"
+    assert evt_obj["handler"] == "onPlay"
+
+
+# =============================================================== #
+# cocos_list_tools — introspection
+# =============================================================== #
+
+def test_cocos_list_tools_returns_every_registered_tool():
+    """Without filters, list_tools returns the full registered surface.
+    This also verifies our test-time registration covers every module."""
+    from mcp.server.fastmcp import FastMCP
+    from cocos.tools import register_all
+
+    mcp = FastMCP("t")
+    register_all(mcp)
+    # Invoke the registered tool — it's captured by the FastMCP
+    # manager, so we pull it back out for direct call.
+    tool = mcp._tool_manager.get_tool("cocos_list_tools")
+    assert tool is not None
+    result = tool.fn()
+
+    assert result["count"] == len(result["tools"])
+    # Sanity: a handful of well-known tools show up.
+    names = {t["name"] for t in result["tools"]}
+    for expected in ("cocos_new_uuid", "cocos_create_scene",
+                     "cocos_add_rigidbody2d", "cocos_list_tools",
+                     "cocos_add_and_attach_script"):
+        assert expected in names, f"{expected} missing from list"
+
+
+def test_cocos_list_tools_name_contains_filter():
+    """``name_contains`` is a case-insensitive substring match."""
+    from mcp.server.fastmcp import FastMCP
+    from cocos.tools import register_all
+
+    mcp = FastMCP("t")
+    register_all(mcp)
+    tool = mcp._tool_manager.get_tool("cocos_list_tools")
+    assert tool is not None
+    result = tool.fn(name_contains="joint")
+
+    names = [t["name"] for t in result["tools"]]
+    assert len(names) >= 8, "expected at least 8 joint-related tools"
+    assert all("joint" in n.lower() for n in names)
+
+
+def test_cocos_list_tools_category_filter():
+    """``category`` narrows to a single heuristic bucket."""
+    from mcp.server.fastmcp import FastMCP
+    from cocos.tools import register_all
+
+    mcp = FastMCP("t")
+    register_all(mcp)
+    tool = mcp._tool_manager.get_tool("cocos_list_tools")
+    assert tool is not None
+    result = tool.fn(category="scaffold")
+
+    assert result["count"] >= 9, "9 gameplay scaffolds + 1 introspection"
+    for item in result["tools"]:
+        assert item["category"] == "scaffold"
+        assert "scaffold" in item["name"].lower()
+
+
+def test_cocos_list_tools_no_other_bucket():
+    """Regression guard for the category heuristic — every registered
+    tool should land in a known bucket. If ``other`` ever grows, add
+    a rule in ``_CATEGORY_RULES``."""
+    from mcp.server.fastmcp import FastMCP
+    from cocos.tools import register_all
+
+    mcp = FastMCP("t")
+    register_all(mcp)
+    tool = mcp._tool_manager.get_tool("cocos_list_tools")
+    assert tool is not None
+    result = tool.fn(category="other")
+    assert result["count"] == 0, \
+        f"these tools need a category rule: {[t['name'] for t in result['tools']]}"
