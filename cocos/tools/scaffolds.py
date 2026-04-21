@@ -175,3 +175,93 @@ def register(mcp: FastMCP) -> None:
         Returns {path, rel_path, uuid_standard, uuid_compressed}.
         """
         return sc.scaffold_game_loop(project_path, states, rel_path)
+
+    @mcp.tool()
+    def cocos_scaffold_ui_screen(project_path: str,
+                                 kind: str = "menu",
+                                 rel_path: str | None = None) -> dict:
+        """Generate <Kind>Screen.ts — full-screen UI controller tied to GameLoop.
+
+        Kinds (all subscribe to the GameLoop singleton — scaffold that
+        first so references resolve):
+
+          "menu"      — title screen. @property startButton, shows when
+                        GameLoop.current == 'menu', click → go('play') + hide.
+          "settings"  — toggleable panel. @property closeButton + exposes
+                        .show() / .hide() / .toggle() for external callers.
+          "pause"     — overlay. Listens for Escape key via cc.input
+                        directly (doesn't require InputManager scaffolded).
+                        @property resumeButton. Toggles 'pause' ↔ 'play'.
+          "game_over" — shown when GameLoop.current == 'over'. Reads
+                        GameScore.I.current + .high into @property
+                        scoreLabel / highLabel. @property restartButton →
+                        GameScore.reset() + GameLoop.go('play').
+
+        Every variant toggles ``@property rootNode.active`` for show/hide
+        (whole-subtree toggle beats per-node UIOpacity for full screens).
+
+        Default rel_path per kind: MenuScreen.ts / SettingsScreen.ts /
+        PauseScreen.ts / GameOverScreen.ts.
+
+        Returns {path, rel_path, uuid_standard, uuid_compressed}.
+        """
+        return sc.scaffold_ui_screen(project_path, kind, rel_path)
+
+    @mcp.tool()
+    def cocos_scaffold_camera_follow(project_path: str,
+                                     rel_path: str = "CameraFollow.ts") -> dict:
+        """Generate CameraFollow.ts — attach to the Camera node to track
+        a target with deadzone + frame-rate-independent smoothing + optional
+        world bounds.
+
+        @property target (Node) — typically the Player.
+        @property offsetX/offsetY/fixedZ — fixed camera offset;
+          fixedZ == -1 means "follow target's z" (sentinel since 0 is
+          a legitimate z value and Cocos Inspector has no null-number).
+        @property smoothing — 0 = instant snap, 1 = very slow lerp.
+          Uses 1 - Math.pow(smoothing, dt) so feel is identical at 30 vs
+          60 vs 120 fps.
+        @property deadzoneWidth/Height — camera only moves when target
+          leaves this centered rect; kills idle-state jitter.
+        @property useWorldBounds + worldBoundsMin/MaxX/Y — optional clamp.
+
+        Zero per-frame allocation (reuses private _tmp + _desired Vec3s);
+        null-checks target each lateUpdate (target may be destroyed mid-
+        scene).
+
+        Returns {path, rel_path, uuid_standard, uuid_compressed}.
+        """
+        return sc.scaffold_camera_follow(project_path, rel_path)
+
+    @mcp.tool()
+    def cocos_scaffold_audio_controller(project_path: str,
+                                        rel_path: str = "AudioController.ts") -> dict:
+        """Generate AudioController.ts — singleton BGM + SFX manager.
+
+        Runtime API::
+
+            AudioController.I.playBGM(clipName)    // cross-fades if switching tracks
+            AudioController.I.stopBGM()
+            AudioController.I.playSFX(clipName)    // overlaps via playOneShot
+            AudioController.I.setBGMVolume(v)      // 0..1, persists
+            AudioController.I.setSFXVolume(v)
+
+        Inspector:
+          @property bgmClips: AudioClip[] — keyed by clip .name for
+                              playBGM lookup.
+          @property sfxClips: AudioClip[] — same convention.
+          @property bgmFadeDuration — tween cross-fade seconds; 0 = hard cut.
+
+        Auto-attaches two ``cc.AudioSource`` components to its own node
+        (looping BGM source + non-loop SFX source) via addComponent in
+        onLoad — no manual Inspector wiring needed. Volumes persist to
+        ``localStorage`` under ``'cocos-mcp-audio'`` with swallowed write
+        failures (private browsing, WeChat mini-game).
+
+        Idempotent: ``playBGM('already-playing')`` is a no-op.
+        Unknown clip names: silently skipped (avoid crashing on stale
+        references to clips the designer removed).
+
+        Returns {path, rel_path, uuid_standard, uuid_compressed}.
+        """
+        return sc.scaffold_audio_controller(project_path, rel_path)
