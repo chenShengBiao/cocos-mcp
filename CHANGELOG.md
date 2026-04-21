@@ -6,7 +6,214 @@ the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Total: **135 tools** (was 80) · **266 tests** (was 45) · **0 mypy / ruff errors**.
+Total: **175 tools** (was 80) · **557 tests** (was 45) · **0 mypy / ruff errors**.
+
+### Added — Gameplay scaffolds (171 → 175 tools)
+
+Before this pass, cocos-mcp did nothing to help with the *behavioural*
+layer — every game AI built from scratch re-wrote the same input
+singleton, score tracker, player controller, etc. in raw .ts. Six
+scaffold tools now generate canonical starter scripts + hand back
+both UUID forms so the next call is a plain ``cocos_add_script``
+attach:
+
+- ``cocos_scaffold_input_abstraction`` — InputManager.ts singleton
+  (WASD + arrows, diagonal-normalized moveDir, SPACE jumpPressed,
+  J / any-touch firePressed; one-frame triggers reset in lateUpdate).
+- ``cocos_scaffold_score_system`` — GameScore.ts singleton
+  (add/reset/current/high + localStorage persistence under
+  'cocos-mcp-high-score', with swallowed write failures for private
+  browsing / WeChat mini-game; optional @property scoreLabel +
+  highLabel auto-render).
+- ``cocos_scaffold_player_controller(kind)`` — 4 variants:
+  *platformer* (RigidBody2D + gravity, moveSpeed/jumpForce/
+  doubleJumpEnabled, ground-detection via velocity threshold);
+  *topdown* (no gravity, full moveDir);
+  *flappy* (single jump impulse on jumpPressed);
+  *click_only* (no physics body — tweens _lpos toward click; the
+  only variant that doesn't depend on InputManager).
+- ``cocos_scaffold_enemy_ai(kind)`` — 3 variants:
+  *patrol* (oscillate between @property patrolA↔patrolB, flip
+  optional mirrorSprite); *chase* (Vec3.distance with
+  chaseRadius/loseAggroRadius hysteresis, kinematic setPosition);
+  *shoot* (stationary turret, fireInterval cooldown, instantiate
+  bulletPrefab toward target).
+- ``cocos_scaffold_spawner(kind)`` — 2 variants: *time*
+  (interval + spawnBoxSize jitter + despawn-oldest queue at
+  maxActive); *proximity* (triggerRadius on @property player +
+  cooldown). Both parent spawned nodes under ``this.node.parent``
+  (explicitly not the spawner itself) + invoke optional @property
+  onSpawn(spawned) post-addChild.
+- ``cocos_scaffold_game_loop(states)`` — singleton state machine,
+  default states=[menu, play, over]. Each state generates paired
+  @property onEnter<PascalCase> + onExit<PascalCase> callbacks
+  (so ``"game_over"`` becomes onEnterGameOver). Validates state
+  names are identifier-safe + unique at scaffold time so a broken
+  .ts never lands.
+
+All scaffolds: 15 kind combinations × ~50-100 LOC TS each,
+embedded inline as Python triple-strings. Each template is
+hand-tuned for production quality (null-checks singletons, guards
+optional refs, uses hysteresis for ranges). Every @property is
+inspector-visible so designers tune numbers without code changes.
+
+### Added — Closed feedback loop (161 → 171 tools)
+
+``cocos_screenshot_preview`` lets the AI *see* its game; this
+batch adds the other half — *interact* + *read state*. The AI can
+now play-test what it built instead of building blind.
+
+- ``cocos_click_preview(url, x, y, button)`` — Playwright mouse
+  click at page coords.
+- ``cocos_press_key_preview(url, key)`` — Cocos KeyCode event
+  fires normally (``"Space"`` / ``"ArrowUp"`` / ``"a"`` / etc).
+- ``cocos_type_preview(url, text)`` — keyboard.type for text
+  fields.
+- ``cocos_drag_preview(url, from_xy, to_xy, steps)`` — mouse
+  move+down + ``steps`` interpolated moves + up, so Cocos drag-
+  detection fires (a raw A→B jump wouldn't).
+- ``cocos_read_preview_state(url, expression)`` — page.evaluate,
+  returns ``{ok, value, error}``; guarded so arbitrary user JS
+  can't crash the tool. Designed for games that expose
+  ``window.game`` in their GameManager.onLoad.
+- ``cocos_wait_for_preview(url, ms)`` — let async loads settle.
+- ``cocos_run_preview_sequence(url, actions)`` — ordered list of
+  click/key/type/drag/wait/read_state/screenshot actions in ONE
+  browser session (game state doesn't survive a reload). Per-
+  action failure doesn't short-circuit so earlier reads survive
+  a later bad click. Screenshot bytes come back hex-encoded for
+  JSON-safe MCP transport.
+- ``cocos_screenshot_preview_diff(before_png, after_png, threshold)``
+  — pure Pillow (no Playwright needed). Per-channel absolute-delta
+  threshold avoids flagging JPEG-like compression noise as
+  change. Returns
+  ``{width, height, total_pixels, different_pixels, diff_ratio}``.
+
+Same install-hint pattern as ``cocos_screenshot_preview``: missing
+playwright → ImportError with ``uv pip install playwright`` +
+``playwright install chromium``; missing chromium binary →
+RuntimeError with the install-step hint.
+
+### Added — Prefab subtree extraction (160 → 161 tools)
+
+Biggest existing prefab gap: the AI could create an empty prefab
+or instantiate one, but had no way to take an already-configured
+scene subtree (Enemy with Sprite + RigidBody + Collider +
+Animation + script all wired) and *export* it as a reusable
+prefab. Without this, "spawn ten enemies" was re-running the
+whole add_* stack ten times.
+
+- ``cocos_save_subtree_as_prefab(scene_path, root_node_id,
+  prefab_path, prefab_uuid?)`` — walks the subtree, transitively
+  collects every descendant cc.Node + component + inline helper
+  (cc.ClickEvent under Button, cc.EventHandler under Toggle).
+  Builds an old→new index map, deep-copies, rewrites ``__id__``
+  refs, mints fresh ``_id`` strings, wires cc.Prefab + cc.PrefabInfo
+  + writes the .prefab + meta.
+- Self-contained enforcement: any ``__id__`` pointing at a cc.Node
+  OUTSIDE the subtree raises ValueError naming the offender and
+  the component context. Cocos's prefab format can't represent
+  late-bound cross-scene refs; silent clipping would produce a
+  .prefab that crashes at instantiation. Atomic on failure (no
+  partial file written).
+- Asset ``__uuid__`` refs (SpriteFrame, clip, mesh, nested prefab)
+  survive unchanged — they travel via the asset DB.
+- Source scene is NEVER mutated. If the caller wants to replace
+  the raw subtree with a prefab instance, do an explicit
+  ``cocos_delete_node`` + ``cocos_instantiate_prefab`` — the
+  two-step is deliberate so a misfired call can't lose the source.
+
+Hidden-capability documentation: prefab files share the JSON-
+array shape of scenes, so every ``scene_builder`` mutation tool
+(add_sprite / add_button / batch_scene_ops / etc) works directly
+on a .prefab path. A regression-guard test pins this behaviour.
+
+### Added — UI/UX pass: design tokens + lint + presets + animations (135 → 160 tools)
+
+Six commits landed an entire design-system layer so AI-built UI
+stops looking "AI-random". Summary of what shipped:
+
+**Design tokens + theme swap** (``cocos_set_ui_theme`` +
+``cocos_get_ui_tokens`` + ``cocos_list_builtin_themes`` +
+``cocos_hex_to_rgba``):
+
+- 5 built-in themes: dark_game / light_minimal / neon_arcade /
+  pastel_cozy / corporate. Each ships the full preset vocabulary
+  (10 colors × 4 font sizes × 5 spacings × 4 radii).
+- ``cocos_add_label`` / ``add_button`` / ``add_sprite`` /
+  ``add_richtext`` gained ``color_preset`` / ``size_preset`` /
+  ``outline_color_preset`` kwargs. ``color_preset="primary"`` on
+  a button AUTO-DERIVES matching hover / pressed / disabled via
+  luminance-aware shading — one preset replaces four hand-picked
+  RGBA quadruples.
+- Fallback: un-themed projects resolve presets against dark_game
+  default so no lookup ever 404s.
+- Custom themes via ``custom={...}`` merge atop dark_game so
+  partial overrides still resolve every preset name.
+
+**UI composites**:
+
+- ``cocos_add_dialog_modal`` / ``add_main_menu`` / ``add_hud_bar``
+  (first batch) — full-screen dialog with buttons, vertical menu
+  with title + buttons, horizontal HUD row.
+- ``cocos_add_toast`` / ``add_loading_spinner`` / ``derive_theme``
+  — ephemeral notification, centered spinner with Animation
+  component driving rotation, helper to generate a custom theme
+  from a seed color.
+- ``cocos_add_card_grid`` — level select / shop / character
+  picker grid. variant="primary" cards auto-flip text color for
+  contrast.
+- ``cocos_add_styled_text_block`` — title + subtitle + divider +
+  body paragraph stacked; resolves sizes + colors from tokens;
+  body uses wrap + overflow=RESIZE_HEIGHT so long paragraphs
+  grow the block instead of clipping.
+
+**Responsive helpers** (``cocos_make_fullscreen`` /
+``cocos_anchor_to_edge`` / ``cocos_center_in_parent`` /
+``cocos_stack_vertically`` / ``cocos_stack_horizontally``):
+
+Collapse the Widget ``align_flags`` bitmask + Layout
+``layoutType`` + ``resizeMode`` + ``h_direction`` trio into five
+verbs. ``stack_*`` accept a token name (``"md"``) OR raw int for
+spacing/padding.
+
+**Animation presets** (``cocos_add_fade_in`` / ``add_slide_in`` /
+``add_scale_in`` / ``add_bounce_in`` / ``add_pulse`` /
+``add_shake``):
+
+Six entrance / feedback animations. ``add_shake`` oscillates
+around the node's CURRENT ``_lpos``, not around origin (the
+common bug that flings the node across the screen). Fixed a
+latent wrap_mode bug in ``create_animation_clip``: was
+hardcoded to 2 (WrapMode.Reverse — plays the clip once
+backwards!); now parameterized with default 1 (Normal, play
+once forward). Regression test locks all five enum values.
+
+**UI lint** (``cocos_lint_ui``) — 8 rules:
+
+- button_touch_target (<44×44 — iOS HIG / Material 48dp)
+- label_overflow_risk (overflow=NONE + no-wrap + long text in
+  narrow box)
+- ui_layer_mismatch (UI component on a non-UI_2D layer —
+  UICamera won't render it)
+- contrast_too_low (WCAG AA threshold per text-size tier — 3:1
+  for large, 4.5:1 for body. Nearest background resolves via
+  cc.Button._N$normalColor preferred, otherwise ancestor
+  cc.Sprite. 12-level ancestor walk.)
+- overlapping_buttons (same-parent, >25% of smaller's area —
+  skips cc.Layout-managed parents since Layout repositions at
+  runtime)
+- huge_font_small_box (UITransform.height < font_size × 1.2)
+- many_buttons_no_layout (≥6 button siblings without cc.Layout
+  — manual positioning at this scale drifts across resolutions.
+  cc.Layout type=NONE counts as "I manage my own layout" so
+  card_grid's self-positioned cards don't trip.)
+- nested_mask_perf (cc.Mask inside another Mask — each stencil
+  pass doubles).
+
+Lint caught two real bugs in our own composites during
+development (main_menu title box ratio, card_grid's hand-
+positioned cells); both fixed in the same commits.
 
 ### Added — Post-build patch registry (131 → 135 tools)
 
