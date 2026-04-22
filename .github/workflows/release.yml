@@ -47,13 +47,15 @@ jobs:
         shell: bash
         run: |
           python -m venv .venv
-          if [ -x .venv/bin/pip ]; then
-            PIP=.venv/bin/pip
+          # 用 `python -m pip`（不是 pip.exe）—— Windows 下 pip.exe 不能自升级，
+          # 因为 exe 正在运行时无法覆盖自己
+          if [ -x .venv/bin/python ]; then
+            PY=.venv/bin/python
           else
-            PIP=.venv/Scripts/pip.exe
+            PY=.venv/Scripts/python.exe
           fi
-          "$PIP" install --upgrade pip
-          "$PIP" install . nuitka
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install . nuitka
 
       - name: Build binary
         shell: bash
