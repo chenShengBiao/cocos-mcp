@@ -149,6 +149,27 @@ In project root or `~/.vscode/settings.json`:
 
 > **Windows users**: replace `bash /path/to/run.sh` with `cmd /c /path/to/run.bat`, or invoke `python server.py` directly after activating the venv.
 
+## 🔄 Updating
+
+For existing installs, pull the latest and sync deps (using the default path `~/.claude/mcp-servers/cocos-mcp`):
+
+```bash
+cd ~/.claude/mcp-servers/cocos-mcp
+git pull
+uv pip install --python .venv/bin/python .   # syncs deps (pyproject may have new packages)
+```
+
+Then **fully restart your MCP client** (Claude Code / Desktop / Cursor / ...).
+Reason: the MCP server is a long-running child process; Python code is already loaded in memory, so the old version keeps running until the client relaunches.
+
+Smoke-test the install:
+
+```bash
+~/.claude/mcp-servers/cocos-mcp/.venv/bin/python -c "import cocos, server; print('import OK')"
+```
+
+> Windows users: use `.\.venv\Scripts\python.exe` instead of `.venv/bin/python`.
+
 ## 🧰 Tools (184 total)
 
 > The server prints the registered count to stderr on startup: `cocos-mcp: N tools registered…`

@@ -149,6 +149,27 @@ claude mcp add -s user cocos-mcp -- bash ~/.claude/mcp-servers/cocos-mcp/run.sh
 
 > **Windows 用户**：把 `bash /path/to/run.sh` 换成 `cmd /c /path/to/run.bat`，或直接用 `python server.py` 启动（需先激活 venv）。
 
+## 🔄 升级
+
+已经装过的用户拉新版本（以默认安装路径 `~/.claude/mcp-servers/cocos-mcp` 为例）：
+
+```bash
+cd ~/.claude/mcp-servers/cocos-mcp
+git pull
+uv pip install --python .venv/bin/python .   # 同步依赖（pyproject 可能新增包）
+```
+
+然后 **完整重启 MCP 客户端**（Claude Code / Desktop / Cursor / ...）。
+理由：MCP server 是常驻子进程，Python 代码已加载进内存；不重启客户端就还在跑旧版本。
+
+快速校验本地安装没坏：
+
+```bash
+~/.claude/mcp-servers/cocos-mcp/.venv/bin/python -c "import cocos, server; print('import OK')"
+```
+
+> Windows 用户：把 `.venv/bin/python` 换成 `.\.venv\Scripts\python.exe`。
+
 ## 🧰 Tools (184 total)
 
 > 启动时 stderr 会打印实际注册数量：`cocos-mcp: N tools registered…`
