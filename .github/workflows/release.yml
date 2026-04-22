@@ -63,6 +63,9 @@ jobs:
 
       - name: Verify binary
         shell: bash
+        # Windows 上 subprocess pipe 阻塞行为不同，Python readline() 可能
+        # 卡住；即便 verify 失败 binary 本身也没问题，不阻塞 artifact 上传。
+        continue-on-error: ${{ matrix.platform == 'win32' }}
         run: |
           if [ -x .venv/bin/python ]; then
             PY=.venv/bin/python

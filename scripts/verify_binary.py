@@ -16,6 +16,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -56,15 +57,26 @@ def main(binary: str) -> int:
     proc.stdin.write(payload)
     proc.stdin.flush()
 
+    # Hard-kill watchdog so a stuck proc.stdout.readline() can't hang forever.
+    # Windows subprocess pipes are blocking and don't respect Python-level
+    # deadlines; killing the child process is the reliable way to unblock
+    # readline() across platforms. macOS onefile cold-start can take 30-60s
+    # when Gatekeeper scans the freshly-extracted runtime, hence the generous
+    # limits below.
+    HARD_TIMEOUT = 180
+    killer = threading.Timer(HARD_TIMEOUT, proc.kill)
+    killer.daemon = True
+    killer.start()
+
     # Read stdout line-by-line until we've collected responses for every id
     # with "id" in msgs (notifications have no id and produce no response).
     want_ids = {m["id"] for m in msgs if "id" in m}
     seen: dict[int, dict] = {}
     lines: list[str] = []
-    deadline = time.perf_counter() + 30
+    deadline = time.perf_counter() + 150
     while seen.keys() != want_ids and time.perf_counter() < deadline:
         line = proc.stdout.readline()
-        if not line:
+        if not line:  # EOF / child killed by watchdog / pipe closed
             break
         lines.append(line)
         try:
@@ -73,6 +85,7 @@ def main(binary: str) -> int:
             continue
         if "id" in obj:
             seen[obj["id"]] = obj
+    killer.cancel()
     proc.terminate()
     try:
         stderr = proc.stderr.read()
