@@ -36,14 +36,18 @@ for arg in "${@:-}"; do
   esac
 done
 
-# ---------- 依赖检查 ----------
+# ---------- 依赖检查（跨平台 venv 定位）----------
 cd "$(dirname "$0")/.."
-[ -x .venv/bin/python ] || {
-  echo "需要 .venv —— 跑 'uv venv .venv && uv pip install .'" >&2
+if [ -x .venv/bin/python ]; then
+  PYTHON=".venv/bin/python"
+elif [ -f .venv/Scripts/python.exe ]; then
+  PYTHON=".venv/Scripts/python.exe"
+else
+  echo "需要 .venv —— 跑 'python -m venv .venv && .venv/bin/pip install . nuitka'" >&2
   exit 3
-}
-.venv/bin/python -m nuitka --version >/dev/null 2>&1 || {
-  echo "Nuitka 未装到 .venv —— 跑 '.venv/bin/pip install nuitka'" >&2
+fi
+"$PYTHON" -m nuitka --version >/dev/null 2>&1 || {
+  echo "Nuitka 未装到 .venv —— 跑 '$PYTHON -m pip install nuitka'" >&2
   exit 4
 }
 
@@ -67,15 +71,22 @@ NUITKA_ARGS=(
 [ $DEBUG -eq 1 ] || NUITKA_ARGS+=(--remove-output)
 
 echo "==> Nuitka 编译（约 30-60 秒）..."
-time .venv/bin/python -m nuitka "${NUITKA_ARGS[@]}" server.py
+time "$PYTHON" -m nuitka "${NUITKA_ARGS[@]}" server.py
 
-OUT="dist/${TARGET}"
-[ -x "$OUT" ] || { echo "FAIL: $OUT 没产出" >&2; exit 5; }
-SIZE="$(du -sh "$OUT" | cut -f1)"
+# Windows 下 Nuitka 自动加 .exe 后缀
+if [ "$PLATFORM" = "win32" ] && [ -f "dist/${TARGET}.exe" ]; then
+  OUT="dist/${TARGET}.exe"
+elif [ -f "dist/${TARGET}" ]; then
+  OUT="dist/${TARGET}"
+else
+  echo "FAIL: dist/${TARGET} 或 dist/${TARGET}.exe 没产出" >&2
+  exit 5
+fi
+SIZE="$(du -sh "$OUT" | cut -f1 | tr -d '[:space:]')"
 echo "==> 产出 ${OUT} (${SIZE})"
 
 # ---------- 验证（可选）----------
 if [ $VERIFY -eq 1 ]; then
   echo "==> 跑启动 + MCP 握手验证"
-  .venv/bin/python scripts/verify_binary.py "$OUT"
+  "$PYTHON" scripts/verify_binary.py "$OUT"
 fi

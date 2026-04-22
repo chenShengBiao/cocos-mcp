@@ -1,0 +1,144 @@
+name: release
+
+# 触发条件：
+#   - 打 tag：git tag v1.2.0 && git push --tags
+#   - 手工：workflow_dispatch
+#
+# 注：此 workflow 在 GitHub Actions 上跑。若源仓库在 Gitee，需先
+# mirror 到 GitHub（见 README "分发 / Distribution" 一节）。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.filename }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14     # Apple Silicon (M 系列)
+            platform: darwin
+            arch: arm64
+            filename: cocos-mcp-darwin-arm64
+          - os: macos-13     # Intel Mac
+            platform: darwin
+            arch: x64
+            filename: cocos-mcp-darwin-x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            filename: cocos-mcp-linux-x64
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            filename: cocos-mcp-win32-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ -x .venv/bin/pip ]; then
+            PIP=.venv/bin/pip
+          else
+            PIP=.venv/Scripts/pip.exe
+          fi
+          "$PIP" install --upgrade pip
+          "$PIP" install . nuitka
+
+      - name: Build binary
+        shell: bash
+        run: ./scripts/build_binary.sh
+
+      - name: Verify binary
+        shell: bash
+        run: |
+          if [ -x .venv/bin/python ]; then
+            PY=.venv/bin/python
+          else
+            PY=.venv/Scripts/python.exe
+          fi
+          "$PY" scripts/verify_binary.py "dist/${{ matrix.filename }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.filename }}
+          path: dist/${{ matrix.filename }}
+          retention-days: 30
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect + checksum
+        shell: bash
+        run: |
+          mkdir -p release
+          find artifacts -type f -name 'cocos-mcp-*' -exec cp {} release/ \;
+          ls -la release/
+          cd release && sha256sum cocos-mcp-* > checksums.txt
+          echo "--- checksums ---"
+          cat checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          body: |
+            ## 下载 / Downloads
+
+            按你的平台选对应 binary：
+
+            | 平台 | 文件 |
+            |---|---|
+            | macOS Apple Silicon（M1-M4）| `cocos-mcp-darwin-arm64` |
+            | macOS Intel | `cocos-mcp-darwin-x64` |
+            | Linux x64 | `cocos-mcp-linux-x64` |
+            | Windows x64 | `cocos-mcp-win32-x64.exe` |
+
+            **校验 SHA-256**：`sha256sum -c checksums.txt`
+
+            ## 注册到 MCP 客户端 / Register
+
+            ```bash
+            # Claude Code
+            claude mcp add -s user cocos-mcp -- /path/to/cocos-mcp-<平台>
+
+            # Claude Desktop / Cursor / Windsurf：编辑对应 mcpServers JSON
+            # 详见 README.md
+            ```
+
+            ## 前置依赖
+
+            - Cocos Creator 3.8+ 必须已安装
+            - Binary 本身零 Python / Node / uv 依赖
+
+            ## macOS 首次运行
+
+            未签名二进制会被 Gatekeeper 拦。解隔离：
+
+            ```bash
+            xattr -dr com.apple.quarantine cocos-mcp-darwin-arm64
+            ```
+
+            （后续上 Apple Developer 签名后此步会自动去掉。）
